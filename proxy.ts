@@ -11,7 +11,7 @@ const ROLE_DASHBOARD_MAP: Record<string, string> = {
 const PROTECTED_PREFIXES = ["/student", "/supervisor", "/hod", "/admin", "/industry"];
 const AUTH_ROUTES = ["/login", "/register", "/login/industry"];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   const isProtectedRoute = PROTECTED_PREFIXES.some((prefix) => pathname.startsWith(prefix));
@@ -40,7 +40,7 @@ export async function middleware(request: NextRequest) {
       sessionData = await sessionRes.json();
     }
   } catch (error) {
-    console.error("[middleware] Error fetching session:", error);
+    console.error("[proxy] Error fetching session:", error);
   }
 
   const isAuthenticated = !!sessionData?.user;
