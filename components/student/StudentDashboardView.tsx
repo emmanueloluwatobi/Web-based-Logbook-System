@@ -43,7 +43,7 @@ export function StudentDashboardView({
             Welcome back, {studentName}
           </h1>
           <p className="font-sans text-sm text-on-surface-variant mt-1">
-            Active 6-Month SIWES Placement at Chevron Nigeria Limited · Week 6 of 12 (42 entries logged)
+            {departmentName} · Active SIWES Placement at Chevron Nigeria Limited · Week 6 of 12 (42 entries logged)
           </p>
         </div>
 

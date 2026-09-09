@@ -10,7 +10,6 @@ import {
   Calendar,
   Clock,
   ArrowUpRight,
-  Paperclip,
   CheckCircle2,
   AlertCircle,
   FileText,
@@ -177,7 +176,7 @@ export function LogbookEntryList({
               return (
                 <button
                   key={tab.key}
-                  onClick={() => setFilterStatus(tab.key as any)}
+                  onClick={() => setFilterStatus(tab.key as EntryStatus | "all")}
                   className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all shrink-0 ${
                     active
                       ? "bg-primary text-on-primary font-semibold shadow-xs"

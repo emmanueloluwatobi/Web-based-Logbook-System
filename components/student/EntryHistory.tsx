@@ -203,7 +203,7 @@ export function EntryHistory({ history, currentEntryId }: EntryHistoryProps) {
                         </div>
                         {item.feedback.comment && (
                           <p className="text-xs text-on-surface mt-1 italic leading-relaxed">
-                            "{item.feedback.comment}"
+                            &ldquo;{item.feedback.comment}&rdquo;
                           </p>
                         )}
                       </div>

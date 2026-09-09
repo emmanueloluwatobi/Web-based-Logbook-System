@@ -11,7 +11,6 @@ import {
   X,
   Shield,
   Briefcase,
-  GraduationCap,
   Building2,
   Mail,
 } from "lucide-react";

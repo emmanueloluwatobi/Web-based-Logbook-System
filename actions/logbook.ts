@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   studentProfile,
@@ -74,6 +74,22 @@ async function ensureStudentPlacement(profileId: string) {
 
   if (existingPlacement) {
     return existingPlacement;
+  }
+
+  // Check if student has a pending placement awaiting approval
+  const [pendingPlacement] = await db
+    .select()
+    .from(placement)
+    .where(
+      and(
+        eq(placement.studentId, profileId),
+        eq(placement.status, "pending")
+      )
+    )
+    .limit(1);
+
+  if (pendingPlacement) {
+    return null;
   }
 
   // Find or create default placement organization
@@ -193,6 +209,13 @@ export async function createEntry(formData: FormData): Promise<EntryMutationResu
 
     // Ensure placement exists
     const activePlacement = await ensureStudentPlacement(profile.id);
+    if (!activePlacement) {
+      return {
+        success: false,
+        error:
+          "Your placement registration is pending department approval. Daily logbook entries unlock once your placement and academic supervisor are approved.",
+      };
+    }
 
     const entryId = crypto.randomUUID();
     let attachmentUrl: string | null = null;
@@ -678,7 +701,12 @@ export async function getEntryVersionChain(entryId: string): Promise<VersionChai
         id: item.entry.id,
         versionNumber: item.entry.versionNumber,
         entryDate: item.entry.entryDate,
-        status: item.entry.status as any,
+        status: item.entry.status as
+          | "draft"
+          | "submitted"
+          | "approved"
+          | "rejected"
+          | "needs_correction",
         hoursWorked: parseFloat(item.entry.hoursWorked) || 8.0,
         activityDescription: item.entry.activityDescription,
         skillsGained: item.entry.skillsGained,
@@ -705,7 +733,12 @@ export async function getEntryVersionChain(entryId: string): Promise<VersionChai
         id: current.id,
         versionNumber: current.versionNumber,
         entryDate: current.entryDate,
-        status: current.status as any,
+        status: current.status as
+          | "draft"
+          | "submitted"
+          | "approved"
+          | "rejected"
+          | "needs_correction",
         hoursWorked: parseFloat(current.hoursWorked) || 8.0,
         activityDescription: current.activityDescription,
         skillsGained: current.skillsGained,

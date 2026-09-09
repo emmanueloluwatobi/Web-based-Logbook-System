@@ -83,7 +83,7 @@ export function EntryDetailView({
     }
   };
 
-  const handleEditComplete = (data: any) => {
+  const handleEditComplete = (data?: LogbookEntryFormData | { id?: string }) => {
     setIsEditing(false);
     if (data?.id && data.id !== entry.id) {
       router.push(`/student/logbook/${data.id}`);
@@ -153,7 +153,7 @@ export function EntryDetailView({
                   {entry.supervisorFeedback.comment && (
                     <div className="mt-2 p-3 rounded-xl bg-surface-container-lowest border border-outline-variant/60">
                       <p className="text-xs text-on-surface italic leading-relaxed">
-                        "{entry.supervisorFeedback.comment}"
+                        &ldquo;{entry.supervisorFeedback.comment}&rdquo;
                       </p>
                     </div>
                   )}
@@ -302,7 +302,7 @@ export function EntryDetailView({
                   {entry.supervisorFeedback.comment ? (
                     <div className="mt-3 p-3.5 rounded-xl bg-surface-container-lowest border border-outline-variant/70 shadow-xs">
                       <p className="text-xs sm:text-sm text-on-surface font-sans leading-relaxed italic">
-                        "{entry.supervisorFeedback.comment}"
+                        &ldquo;{entry.supervisorFeedback.comment}&rdquo;
                       </p>
                     </div>
                   ) : (

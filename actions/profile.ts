@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
 import { eq, and, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
-import { studentProfile, user } from "@/db/schema";
+import { studentProfile } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { uploadAvatar } from "@/lib/supabase-storage";
 

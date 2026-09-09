@@ -128,9 +128,9 @@ export const placement = pgTable("placement", {
   organizationId: uuid("organization_id")
     .notNull()
     .references(() => organization.id, { onDelete: "restrict" }),
-  schoolSupervisorId: text("school_supervisor_id")
-    .notNull()
-    .references(() => user.id, { onDelete: "restrict" }),
+  schoolSupervisorId: text("school_supervisor_id").references(() => user.id, {
+    onDelete: "restrict",
+  }),
   industrySupervisorId: text("industry_supervisor_id").references(() => user.id, {
     onDelete: "set null",
   }),

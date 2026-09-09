@@ -1,11 +1,9 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
-  Calendar,
   Clock,
   UploadCloud,
-  FileText,
   Save,
   Send,
   Paperclip,
@@ -28,10 +26,11 @@ export interface LogbookEntryFormData {
   attachmentUrl?: string;
   status: EntryStatus;
   versionNumber?: number;
+  submittedAt?: string;
 }
 
 interface EntryFormProps {
-  onSubmit?: (data: any, isDraft: boolean) => void;
+  onSubmit?: (data: LogbookEntryFormData, isDraft: boolean) => void;
   onCancel?: () => void;
   initialData?: LogbookEntryFormData | null;
   mode?: "create" | "edit" | "resubmit";
@@ -62,10 +61,10 @@ export function EntryForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Derive hoursWorked from Start Time and End Time (UI convenience only)
-  useEffect(() => {
-    if (startTime && endTime) {
-      const [startH, startM] = startTime.split(":").map(Number);
-      const [endH, endM] = endTime.split(":").map(Number);
+  const calculateDerivedHours = (sTime: string, eTime: string) => {
+    if (sTime && eTime) {
+      const [startH, startM] = sTime.split(":").map(Number);
+      const [endH, endM] = eTime.split(":").map(Number);
       const startMinutes = startH * 60 + startM;
       const endMinutes = endH * 60 + endM;
       const diffMinutes = endMinutes - startMinutes;
@@ -75,7 +74,7 @@ export function EntryForm({
         setHoursWorked(calculated);
       }
     }
-  }, [startTime, endTime]);
+  };
 
   const handleFile = (file: File | undefined) => {
     if (!file) return;
@@ -276,7 +275,10 @@ export function EntryForm({
               <input
                 type="time"
                 value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
+                onChange={(e) => {
+                  setStartTime(e.target.value);
+                  calculateDerivedHours(e.target.value, endTime);
+                }}
                 className="w-full h-10 px-3 text-sm rounded-md bg-surface-container-lowest border border-outline-variant text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
               />
             </div>
@@ -290,7 +292,10 @@ export function EntryForm({
               <input
                 type="time"
                 value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
+                onChange={(e) => {
+                  setEndTime(e.target.value);
+                  calculateDerivedHours(startTime, e.target.value);
+                }}
                 className="w-full h-10 px-3 text-sm rounded-md bg-surface-container-lowest border border-outline-variant text-on-surface focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
               />
             </div>

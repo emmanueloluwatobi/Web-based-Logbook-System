@@ -33,7 +33,7 @@ export default async function StudentLogbookPage() {
   }
 
   // Fetch linked student profile
-  let [profile] = await db
+  const [profile] = await db
     .select()
     .from(studentProfile)
     .where(eq(studentProfile.userId, session.user.id))
@@ -41,7 +41,7 @@ export default async function StudentLogbookPage() {
 
   let initialEntries: LogbookEntryItem[] = [];
   let supervisorName = "Dr. Babatunde Adeyemi";
-  let supervisorRole = "School Supervisor · Computer Science";
+  const supervisorRole = "School Supervisor · Computer Science";
 
   if (profile) {
     // 1. Fetch real logbook entries
