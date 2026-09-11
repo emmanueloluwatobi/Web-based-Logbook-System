@@ -42,6 +42,38 @@ async function assertStaff() {
 }
 
 /**
+ * For HOD users, verifies that the target student belongs to the HOD's own department.
+ * Admin users bypass this check entirely.
+ */
+async function verifyHodDepartmentScope(
+  session: { user: { id: string; role: string; departmentId?: string | null } },
+  targetStudentProfileId: string
+): Promise<{ error: string | null }> {
+  // Admin bypasses department check
+  if (session.user.role === "admin") return { error: null };
+
+  if (!session.user.departmentId) {
+    return { error: "Your account is not assigned to a department." };
+  }
+
+  // Fetch the student's user record to check departmentId
+  const [studentData] = await db
+    .select({ departmentId: user.departmentId })
+    .from(studentProfile)
+    .innerJoin(user, eq(studentProfile.userId, user.id))
+    .where(eq(studentProfile.id, targetStudentProfileId))
+    .limit(1);
+
+  if (!studentData) return { error: "Student not found." };
+
+  if (studentData.departmentId !== session.user.departmentId) {
+    return { error: "You can only manage students within your own department." };
+  }
+
+  return { error: null };
+}
+
+/**
  * Ensures session belongs to a student and returns their profile.
  */
 async function assertStudent() {
@@ -313,8 +345,8 @@ export async function submitStudentPlacement(formData: FormData): Promise<Placem
 
 export async function approveStudentPlacement(formData: FormData): Promise<PlacementMutationResult> {
   try {
-    const { error: staffError } = await assertStaff();
-    if (staffError) return { success: false, error: staffError };
+    const { error: staffError, session } = await assertStaff();
+    if (staffError || !session) return { success: false, error: staffError || "Unauthorized" };
 
     const placementId = formData.get("placementId") as string;
     const schoolSupervisorId = formData.get("schoolSupervisorId") as string;
@@ -341,6 +373,18 @@ export async function approveStudentPlacement(formData: FormData): Promise<Place
       return { success: false, error: "Selected supervisor is not a valid School Supervisor." };
     }
 
+    // HOD department-scoping: verify student is in same department
+    const [placementRecord] = await db
+      .select({ studentId: placement.studentId })
+      .from(placement)
+      .where(eq(placement.id, placementId))
+      .limit(1);
+
+    if (placementRecord) {
+      const { error: scopeError } = await verifyHodDepartmentScope(session, placementRecord.studentId);
+      if (scopeError) return { success: false, error: scopeError };
+    }
+
     const updatePayload: Record<string, unknown> = {
       schoolSupervisorId,
       status: "active",
@@ -362,6 +406,8 @@ export async function approveStudentPlacement(formData: FormData): Promise<Place
     revalidatePath("/admin/placements");
     revalidatePath("/student/placement");
     revalidatePath("/student");
+    revalidatePath("/hod");
+    revalidatePath("/hod/students");
 
     return { success: true, data: updated };
   } catch (error) {
@@ -372,8 +418,8 @@ export async function approveStudentPlacement(formData: FormData): Promise<Place
 
 export async function createDepartmentPlacement(formData: FormData): Promise<PlacementMutationResult> {
   try {
-    const { error: staffError } = await assertStaff();
-    if (staffError) return { success: false, error: staffError };
+    const { error: staffError, session } = await assertStaff();
+    if (staffError || !session) return { success: false, error: staffError || "Unauthorized" };
 
     const studentProfileId = formData.get("studentProfileId") as string;
     let organizationId = (formData.get("organizationId") as string) || "";
@@ -387,6 +433,10 @@ export async function createDepartmentPlacement(formData: FormData): Promise<Pla
     if (!studentProfileId) {
       return { success: false, error: "Student selection is required." };
     }
+
+    // HOD department-scoping: verify student is in same department
+    const { error: scopeError } = await verifyHodDepartmentScope(session, studentProfileId);
+    if (scopeError) return { success: false, error: scopeError };
 
     if (!schoolSupervisorId) {
       return { success: false, error: "School Supervisor assignment is required." };
@@ -470,6 +520,8 @@ export async function createDepartmentPlacement(formData: FormData): Promise<Pla
     revalidatePath("/admin/placements");
     revalidatePath("/student/placement");
     revalidatePath("/student");
+    revalidatePath("/hod");
+    revalidatePath("/hod/students");
 
     return { success: true, data: created };
   } catch (error) {
@@ -480,8 +532,8 @@ export async function createDepartmentPlacement(formData: FormData): Promise<Pla
 
 export async function updatePlacement(formData: FormData): Promise<PlacementMutationResult> {
   try {
-    const { error: staffError } = await assertStaff();
-    if (staffError) return { success: false, error: staffError };
+    const { error: staffError, session } = await assertStaff();
+    if (staffError || !session) return { success: false, error: staffError || "Unauthorized" };
 
     const placementId = formData.get("id") as string;
     const organizationId = formData.get("organizationId") as string;
@@ -494,6 +546,20 @@ export async function updatePlacement(formData: FormData): Promise<PlacementMuta
     if (!placementId) {
       return { success: false, error: "Placement ID is required." };
     }
+
+    // Verify HOD department scoping
+    const [existingPlacement] = await db
+      .select({ id: placement.id, studentId: placement.studentId })
+      .from(placement)
+      .where(eq(placement.id, placementId))
+      .limit(1);
+
+    if (!existingPlacement) {
+      return { success: false, error: "Placement not found." };
+    }
+
+    const { error: scopeError } = await verifyHodDepartmentScope(session, existingPlacement.studentId);
+    if (scopeError) return { success: false, error: scopeError };
 
     if (startDate && endDate) {
       const startObj = new Date(startDate);
@@ -533,6 +599,9 @@ export async function updatePlacement(formData: FormData): Promise<PlacementMuta
     revalidatePath("/admin/placements");
     revalidatePath("/student/placement");
     revalidatePath("/student");
+    revalidatePath("/hod");
+    revalidatePath("/hod/students");
+    revalidatePath(`/hod/students/${existingPlacement.studentId}`);
 
     return { success: true, data: updated };
   } catch (error) {
@@ -567,10 +636,86 @@ export async function deletePlacement(id: string): Promise<PlacementMutationResu
     revalidatePath("/admin/placements");
     revalidatePath("/student/placement");
     revalidatePath("/student");
+    revalidatePath("/hod");
+    revalidatePath("/hod/students");
 
     return { success: true };
   } catch (error) {
     console.error("[actions/placement.deletePlacement]", error);
     return { success: false, error: "Failed to delete placement." };
+  }
+}
+
+// ==========================================
+// HOD — Supervisor Assignment
+// ==========================================
+
+export async function assignSupervisor(
+  studentProfileId: string,
+  supervisorId: string
+): Promise<PlacementMutationResult> {
+  try {
+    const { error: staffError, session } = await assertStaff();
+    if (staffError || !session) return { success: false, error: staffError || "Unauthorized" };
+
+    if (!studentProfileId || !supervisorId) {
+      return { success: false, error: "Student and supervisor selections are required." };
+    }
+
+    // Department-scoping: verify student is in HOD's department
+    const { error: scopeError } = await verifyHodDepartmentScope(session, studentProfileId);
+    if (scopeError) return { success: false, error: scopeError };
+
+    // Verify supervisor exists and is a school_supervisor
+    const [supervisor] = await db
+      .select({ id: user.id, departmentId: user.departmentId })
+      .from(user)
+      .where(and(eq(user.id, supervisorId), eq(user.role, "school_supervisor")))
+      .limit(1);
+
+    if (!supervisor) {
+      return { success: false, error: "Selected user is not a valid School Supervisor." };
+    }
+
+    // For HOD, also verify supervisor is in the same department
+    if (session.user.role === "hod" && session.user.departmentId) {
+      if (supervisor.departmentId !== session.user.departmentId) {
+        return { success: false, error: "You can only assign supervisors from your own department." };
+      }
+    }
+
+    // Find the student's active or pending placement
+    const [activePlacement] = await db
+      .select({ id: placement.id })
+      .from(placement)
+      .where(
+        and(
+          eq(placement.studentId, studentProfileId),
+          inArray(placement.status, ["pending", "active"])
+        )
+      )
+      .limit(1);
+
+    if (!activePlacement) {
+      return { success: false, error: "This student does not have an active or pending placement to assign a supervisor to." };
+    }
+
+    await db
+      .update(placement)
+      .set({ schoolSupervisorId: supervisorId })
+      .where(eq(placement.id, activePlacement.id));
+
+    revalidatePath("/hod");
+    revalidatePath("/hod/students");
+    revalidatePath(`/hod/students/${studentProfileId}`);
+    revalidatePath("/supervisor");
+    revalidatePath("/student/placement");
+    revalidatePath("/student");
+    revalidatePath("/admin/placements");
+
+    return { success: true };
+  } catch (error) {
+    console.error("[actions/placement.assignSupervisor]", error);
+    return { success: false, error: "Failed to assign supervisor." };
   }
 }

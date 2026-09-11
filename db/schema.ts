@@ -145,6 +145,7 @@ export const placement = pgTable("placement", {
   })
     .default("pending")
     .notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 // --- Logbook Entries & Supervision ---

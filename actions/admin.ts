@@ -396,6 +396,27 @@ export async function createStaffUser(input: {
       return { success: false, error: `A user with email ${email} already exists.` };
     }
 
+    // One active HOD per department — soft block per project-overview.md invariant
+    if (role === "hod" && departmentId) {
+      const [existingHod] = await db
+        .select({ id: schema.user.id, name: schema.user.name })
+        .from(schema.user)
+        .where(
+          and(
+            eq(schema.user.role, "hod"),
+            eq(schema.user.departmentId, departmentId)
+          )
+        )
+        .limit(1);
+
+      if (existingHod) {
+        return {
+          success: false,
+          error: `This department already has an active HOD (${existingHod.name}). Remove or reassign the existing HOD before creating a new one.`,
+        };
+      }
+    }
+
     const userId = crypto.randomUUID();
     const inviteToken = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
 
