@@ -204,6 +204,7 @@ export const attendance = pgTable("attendance", {
   checkOut: time("check_out"),
   hours: numeric("hours"), // derived, stored for query speed
   status: text("status", { enum: ["present", "absent", "late"] }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 // --- Review Rubric Type ---
