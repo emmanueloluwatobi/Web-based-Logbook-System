@@ -6,9 +6,9 @@ import type { RubricScores } from "@/db/schema";
  */
 export const RUBRIC_WEIGHTS = {
   punctuality: 0.10,
-  technicalCompetence: 0.25,
-  communication: 0.15,
-  teamwork: 0.15,
+  technicalCompetence: 0.20,
+  communication: 0.10,
+  teamwork: 0.10,
   problemSolving: 0.15,
   professionalism: 0.15,
   overallPerformance: 0.20,
@@ -26,7 +26,7 @@ export function calculateRubricScore(scores: RubricScores): number {
     return acc + val * weight;
   }, 0);
 
-  return Math.round(total * 10) / 10;
+  return Math.max(0, Math.min(100, Math.round(total * 10) / 10));
 }
 
 /**

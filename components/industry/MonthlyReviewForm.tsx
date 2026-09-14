@@ -52,19 +52,19 @@ const CRITERIA: CriterionConfig[] = [
   {
     key: "technicalCompetence",
     title: "Technical Competence & Practical Skills",
-    weightLabel: "25% Weight",
+    weightLabel: "20% Weight",
     description: "Applies academic principles, learns company tools and methods, and executes practical tasks.",
   },
   {
     key: "communication",
     title: "Communication & Reporting",
-    weightLabel: "15% Weight",
+    weightLabel: "10% Weight",
     description: "Expresses ideas clearly, asks insightful questions, and submits coherent progress updates.",
   },
   {
     key: "teamwork",
     title: "Teamwork & Interpersonal Relations",
-    weightLabel: "15% Weight",
+    weightLabel: "10% Weight",
     description: "Cooperates effectively with colleagues, respects workplace hierarchy, and integrates into company culture.",
   },
   {
