@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { toast } from "sonner";
-import { verifyIndustrySupervisorEmail } from "@/actions/assessment";
+import { requestIndustryLoginCode } from "@/actions/assessment";
 
 export function IndustryLoginForm() {
   const router = useRouter();
@@ -38,42 +38,17 @@ export function IndustryLoginForm() {
 
     setLoading(true);
     try {
-      // 1. Pre-flight verification: ensure email is registered as an Industry Supervisor
-      const check = await verifyIndustrySupervisorEmail(cleanEmail);
-      if (!check.success) {
-        setErrorMessage(check.error || "This email is not authorized for Industry Supervisor access.");
-        setLoading(false);
-        return;
-      }
-
-      // 2. Dispatch OTP and Magic Link only for verified industry supervisors
-      const [otpRes, magicRes] = await Promise.allSettled([
-        authClient.emailOtp.sendVerificationOtp({
-          email: cleanEmail,
-          type: "sign-in",
-        }),
-        authClient.signIn.magicLink({
-          email: cleanEmail,
-          callbackURL: "/industry",
-        }),
-      ]);
-
-      const isOtpSuccess = otpRes.status === "fulfilled" && !otpRes.value.error;
-      const isMagicSuccess = magicRes.status === "fulfilled" && !magicRes.value.error;
-
-      if (!isOtpSuccess && !isMagicSuccess) {
-        const errorText =
-          (otpRes.status === "fulfilled" && otpRes.value.error?.message) ||
-          (magicRes.status === "fulfilled" && magicRes.value.error?.message) ||
-          "Failed to dispatch sign-in code. Please verify your email.";
-        setErrorMessage(errorText);
+      // Dispatch OTP and Magic Link via rate-limited, privacy-preserving server action
+      const res = await requestIndustryLoginCode(cleanEmail);
+      if (!res.success) {
+        setErrorMessage(res.error || "Failed to dispatch sign-in code. Please try again.");
         setLoading(false);
         return;
       }
 
       setStep("verify");
       setLoading(false);
-      toast.success("Verification code sent to your email.");
+      toast.success("If your email is registered with an active placement, a verification code has been dispatched.");
     } catch (err: unknown) {
       console.error("[IndustryLoginForm] Dispatch error:", err);
       setErrorMessage("An unexpected error occurred. Please try again.");
@@ -104,7 +79,7 @@ export function IndustryLoginForm() {
         return;
       }
 
-      // 3. Security: verify that the authenticated account has industry_supervisor role
+      // Security: verify that the authenticated account has industry_supervisor role
       const session = await authClient.getSession();
       const userRole = session?.data?.user?.role;
       if (userRole && userRole !== "industry_supervisor") {
@@ -134,8 +109,7 @@ export function IndustryLoginForm() {
             Enter Verification Code
           </h2>
           <p className="font-sans text-xs text-on-surface-variant max-w-xs mx-auto mt-1 leading-relaxed">
-            We sent a 6-digit code and a one-click sign-in link to{" "}
-            <strong className="text-on-surface font-semibold">{email}</strong>.
+            If <strong className="text-on-surface font-semibold">{email}</strong> matches an authorized Industry Supervisor with an active placement, a 6-digit access code and sign-in link were sent to your inbox.
           </p>
         </div>
 

@@ -19,6 +19,7 @@ import {
 import { auth } from "@/lib/auth";
 import { sendIndustryInviteEmail, logNotification } from "@/lib/resend";
 import { calculateRubricScore } from "@/lib/utils";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 export interface AssessmentActionResult<T = unknown> {
   success: boolean;
@@ -50,7 +51,7 @@ async function assertStaff() {
 
 /**
  * Ensures caller is an authenticated Industry Supervisor with at least one
- * valid placement assignment in the university database.
+ * currently active placement assignment (placement.status = 'active').
  */
 async function assertIndustrySupervisor() {
   const session = await auth.api.getSession({
@@ -68,16 +69,22 @@ async function assertIndustrySupervisor() {
     };
   }
 
-  // Security Invariant: Verify valid/active placement assignment
-  const [assignedPlacement] = await db
-    .select({ id: placement.id })
+  // Security Invariant: Verify supervisor has at least one active placement
+  const [activePlacement] = await db
+    .select({ id: placement.id, status: placement.status })
     .from(placement)
-    .where(eq(placement.industrySupervisorId, session.user.id))
+    .where(
+      and(
+        eq(placement.industrySupervisorId, session.user.id),
+        eq(placement.status, "active"),
+      ),
+    )
     .limit(1);
 
-  if (!assignedPlacement) {
+  if (!activePlacement) {
     return {
-      error: "No student placement assignments found for this Industry Supervisor account.",
+      error:
+        "No active student placement assignments found for this Industry Supervisor account. Access is restricted to supervisors with active placements.",
       session: null,
     };
   }
@@ -86,16 +93,20 @@ async function assertIndustrySupervisor() {
 }
 
 /**
- * Verifies that an email belongs to an existing Industry Supervisor with an active
- * student placement assignment before initiating passwordless OTP / magic link authentication flows.
+ * Unauthenticated server action for requesting an industry supervisor login code/link.
  *
- * Security Model: Exists → Industry Supervisor role → valid/active assignment → authenticated → access granted
+ * Implements privacy-preserving login with rate-limiting:
+ * - Rate limits by IP address and normalized email to prevent brute-force attacks.
+ * - Enforces the security model: Exists -> Industry Supervisor role -> placement.status === 'active'.
+ * - Returns a generic, constant message to the client regardless of whether the email is
+ *   unregistered, a student/staff account, an inactive mentor, or an active supervisor.
+ *   This completely eliminates account and role enumeration.
  */
-export async function verifyIndustrySupervisorEmail(
-  email: string,
-): Promise<AssessmentActionResult<{ exists: boolean }>> {
+export async function requestIndustryLoginCode(
+  rawEmail: string,
+): Promise<AssessmentActionResult<{ dispatched: boolean }>> {
   try {
-    const cleanEmail = email?.trim().toLowerCase();
+    const cleanEmail = rawEmail?.trim().toLowerCase();
     if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
       return {
         success: false,
@@ -103,60 +114,100 @@ export async function verifyIndustrySupervisorEmail(
       };
     }
 
-    // 1. Exists?
+    // Rate Limiting: max 5 requests per 60 seconds per IP and per email
+    const reqHeaders = await headers();
+    const forwarded = reqHeaders.get("x-forwarded-for");
+    const clientIp = forwarded ? forwarded.split(",")[0].trim() : reqHeaders.get("x-real-ip") || "unknown-ip";
+
+    const ipLimit = checkRateLimit(`industry-ip:${clientIp}`, { limit: 5, windowMs: 60_000 });
+    const emailLimit = checkRateLimit(`industry-email:${cleanEmail}`, { limit: 5, windowMs: 60_000 });
+
+    if (!ipLimit.allowed || !emailLimit.allowed) {
+      return {
+        success: false,
+        error: "Too many login attempts. Please wait 60 seconds before trying again.",
+      };
+    }
+
+    // Constant generic success response to eliminate account and role enumeration
+    const genericSuccess = {
+      success: true,
+      data: { dispatched: true },
+    };
+
+    // Internal Eligibility Check:
+    // 1. Exists in user table?
     const [foundUser] = await db
-      .select({ id: user.id, role: user.role, name: user.name })
+      .select({ id: user.id, role: user.role })
       .from(user)
       .where(eq(user.email, cleanEmail))
       .limit(1);
 
-    if (!foundUser) {
-      return {
-        success: false,
-        error:
-          "This email address is not registered as an Industry Supervisor. Only workplace mentors assigned by the university can access this portal.",
-      };
+    if (!foundUser || foundUser.role !== "industry_supervisor") {
+      console.warn(`[requestIndustryLoginCode] Suppressed code dispatch for non-supervisor: ${cleanEmail}`);
+      return genericSuccess;
     }
 
-    // 2. Industry Supervisor role?
-    if (foundUser.role !== "industry_supervisor") {
-      const roleLabel =
-        foundUser.role === "student"
-          ? "Student"
-          : foundUser.role === "school_supervisor"
-            ? "Academic Supervisor"
-            : foundUser.role === "hod"
-              ? "Head of Department"
-              : "Administrative Staff";
-      return {
-        success: false,
-        error: `This email is registered as a ${roleLabel} account. The Industry Portal is reserved exclusively for external workplace mentors. Please use the Student & Staff login page.`,
-      };
-    }
-
-    // 3. Valid / active placement assignment?
-    const [assignedPlacement] = await db
-      .select({ id: placement.id, status: placement.status })
+    // 2. Has an active placement assignment (placement.status = 'active')?
+    const [activePlacement] = await db
+      .select({ id: placement.id })
       .from(placement)
-      .where(eq(placement.industrySupervisorId, foundUser.id))
+      .where(
+        and(
+          eq(placement.industrySupervisorId, foundUser.id),
+          eq(placement.status, "active"),
+        ),
+      )
       .limit(1);
 
-    if (!assignedPlacement) {
-      return {
-        success: false,
-        error:
-          "No student placement assignments were found for this Industry Supervisor account. Please ensure that your student's placement has been registered and approved by the department before signing in.",
-      };
+    if (!activePlacement) {
+      console.warn(
+        `[requestIndustryLoginCode] Suppressed code dispatch for supervisor without active placement: ${cleanEmail}`,
+      );
+      return genericSuccess;
     }
 
-    return { success: true, data: { exists: true } };
+    // 3. Dispatch OTP and Magic Link through Better Auth
+    try {
+      await auth.api.sendVerificationOTP({
+        body: { email: cleanEmail, type: "sign-in" },
+        headers: reqHeaders,
+      });
+    } catch (otpErr) {
+      console.error("[requestIndustryLoginCode] OTP dispatch error:", otpErr);
+    }
+
+    try {
+      await auth.api.signInMagicLink({
+        body: { email: cleanEmail, callbackURL: "/industry" },
+        headers: reqHeaders,
+      });
+    } catch (magicErr) {
+      console.error("[requestIndustryLoginCode] Magic link dispatch error:", magicErr);
+    }
+
+    return genericSuccess;
   } catch (err) {
-    console.error("[verifyIndustrySupervisorEmail] Error:", err);
+    console.error("[requestIndustryLoginCode] Error:", err);
     return {
       success: false,
-      error: "An unexpected error occurred while verifying supervisor email. Please try again.",
+      error: "An unexpected error occurred. Please try again.",
     };
   }
+}
+
+/**
+ * Backward-compatible alias for requestIndustryLoginCode with generic privacy-preserving return.
+ */
+export async function verifyIndustrySupervisorEmail(
+  email: string,
+): Promise<AssessmentActionResult<{ exists: boolean }>> {
+  const result = await requestIndustryLoginCode(email);
+  return {
+    success: result.success,
+    error: result.error,
+    data: { exists: true },
+  };
 }
 
 /**
@@ -336,20 +387,29 @@ export async function submitMonthlyReview(formData: FormData): Promise<Assessmen
       return { success: false, error: "Invalid review month format. Expected YYYY-MM." };
     }
 
-    // Verify supervisor is assigned to this placement and fetch placement dates
+    // Verify supervisor is assigned to this placement and fetch active placement dates
     const [targetPlacement] = await db
       .select({
         id: placement.id,
         industrySupervisorId: placement.industrySupervisorId,
         startDate: placement.startDate,
         endDate: placement.endDate,
+        status: placement.status,
       })
       .from(placement)
-      .where(eq(placement.id, placementId))
+      .where(
+        and(
+          eq(placement.id, placementId),
+          eq(placement.status, "active"),
+        ),
+      )
       .limit(1);
 
     if (!targetPlacement) {
-      return { success: false, error: "Placement record not found." };
+      return {
+        success: false,
+        error: "Placement record not found or is not currently active.",
+      };
     }
 
     if (targetPlacement.industrySupervisorId !== session.user.id) {
@@ -476,7 +536,12 @@ export async function getIndustrySupervisorPlacements() {
       .innerJoin(studentProfile, eq(placement.studentId, studentProfile.id))
       .innerJoin(user, eq(studentProfile.userId, user.id))
       .innerJoin(organization, eq(placement.organizationId, organization.id))
-      .where(eq(placement.industrySupervisorId, session.user.id));
+      .where(
+        and(
+          eq(placement.industrySupervisorId, session.user.id),
+          eq(placement.status, "active"),
+        ),
+      );
 
     // For each placement, fetch department name, attendance stats, and latest review status
     const results = [];

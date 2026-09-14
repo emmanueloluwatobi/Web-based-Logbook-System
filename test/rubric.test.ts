@@ -88,6 +88,8 @@ test("escapeHtml: safely sanitizes HTML injection and special characters", () =>
   assert.strictEqual(escapeHtml("John Doe"), "John Doe");
 });
 
+import { checkRateLimit } from "../lib/rate-limit";
+
 test("auth configuration: emailOTP and magicLink plugins exist and role input is forbidden", () => {
   const plugins = auth.options.plugins;
   assert.ok(plugins && plugins.length >= 2, "Plugins must be registered on auth");
@@ -102,5 +104,30 @@ test("auth configuration: emailOTP and magicLink plugins exist and role input is
     "Client input for user role must be disabled"
   );
 });
+
+test("checkRateLimit: allows requests within limit and blocks excess requests", () => {
+  const testKey = `test-ip-${Date.now()}`;
+  const config = { limit: 3, windowMs: 1000 };
+
+  // First 3 requests should be allowed
+  const r1 = checkRateLimit(testKey, config);
+  assert.strictEqual(r1.allowed, true);
+  assert.strictEqual(r1.remaining, 2);
+
+  const r2 = checkRateLimit(testKey, config);
+  assert.strictEqual(r2.allowed, true);
+  assert.strictEqual(r2.remaining, 1);
+
+  const r3 = checkRateLimit(testKey, config);
+  assert.strictEqual(r3.allowed, true);
+  assert.strictEqual(r3.remaining, 0);
+
+  // 4th request must be blocked
+  const r4 = checkRateLimit(testKey, config);
+  assert.strictEqual(r4.allowed, false);
+  assert.strictEqual(r4.remaining, 0);
+  assert.ok(r4.resetMs > 0);
+});
+
 
 
