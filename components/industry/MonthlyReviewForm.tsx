@@ -97,9 +97,8 @@ export function MonthlyReviewForm({
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
-  const [selectedMonth, setSelectedMonth] = useState(
-    existingReview?.reviewMonth || currentMonth
-  );
+  // Use currentMonth from server
+  const reviewCycleMonth = existingReview?.reviewMonth || currentMonth;
 
   // Rubric Scores (0-100)
   const [scores, setScores] = useState<RubricScores>({
@@ -152,10 +151,11 @@ export function MonthlyReviewForm({
     startTransition(async () => {
       const formData = new FormData();
       formData.append("placementId", placementId);
-      formData.append("reviewMonth", selectedMonth);
+      formData.append("reviewMonth", reviewCycleMonth);
       formData.append("comment", comment.trim());
       formData.append("attestationName", attestationName.trim());
       formData.append("attestationOfficeId", attestationOfficeId.trim());
+      formData.append("attested", attested ? "true" : "false");
 
       Object.entries(scores).forEach(([key, val]) => {
         formData.append(key, String(val));
@@ -208,19 +208,13 @@ export function MonthlyReviewForm({
           </div>
 
           <div className="flex items-center gap-2 self-start sm:self-auto">
-            <label
-              htmlFor="review-month"
-              className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant font-heading"
-            >
-              Cycle:
-            </label>
-            <input
-              id="review-month"
-              type="month"
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(e.target.value)}
-              className="h-8 px-2.5 text-xs font-medium rounded-lg bg-surface-container-low border border-outline-variant text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
-            />
+            <span className="text-xs font-semibold uppercase tracking-wider text-on-surface-variant font-heading">
+              Review Cycle:
+            </span>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-container-low border border-outline-variant text-xs font-semibold text-on-surface font-mono">
+              <Calendar className="size-3.5 text-primary" />
+              <span>{reviewCycleMonth}</span>
+            </div>
           </div>
         </div>
 
@@ -366,6 +360,9 @@ export function MonthlyReviewForm({
           <label className="flex items-start gap-2.5 cursor-pointer pt-1">
             <input
               type="checkbox"
+              id="attestation-checkbox"
+              name="attested"
+              value="true"
               required
               checked={attested}
               onChange={(e) => setAttested(e.target.checked)}

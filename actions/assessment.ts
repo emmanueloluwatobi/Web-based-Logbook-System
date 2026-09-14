@@ -233,14 +233,28 @@ export async function submitMonthlyReview(formData: FormData): Promise<Assessmen
       };
     }
 
+    // Server-side attestation enforcement: require explicit confirmation
+    const attested = formData.get("attested");
+    if (attested !== "true" && attested !== "on") {
+      return {
+        success: false,
+        error: "You must check and accept the legal/institutional attestation before submitting.",
+      };
+    }
+
     // Validate reviewMonth format YYYY-MM
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(reviewMonth)) {
       return { success: false, error: "Invalid review month format. Expected YYYY-MM." };
     }
 
-    // Verify supervisor is assigned to this placement
+    // Verify supervisor is assigned to this placement and fetch placement dates
     const [targetPlacement] = await db
-      .select({ id: placement.id, industrySupervisorId: placement.industrySupervisorId })
+      .select({
+        id: placement.id,
+        industrySupervisorId: placement.industrySupervisorId,
+        startDate: placement.startDate,
+        endDate: placement.endDate,
+      })
       .from(placement)
       .where(eq(placement.id, placementId))
       .limit(1);
@@ -253,6 +267,26 @@ export async function submitMonthlyReview(formData: FormData): Promise<Assessmen
       return {
         success: false,
         error: "You are not authorized to submit reviews for this student placement.",
+      };
+    }
+
+    // Enforce allowed review period: no future calendar months
+    const now = new Date();
+    const currentCalendarMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    if (reviewMonth > currentCalendarMonth) {
+      return {
+        success: false,
+        error: "Evaluation cannot be submitted for a future calendar month.",
+      };
+    }
+
+    // Enforce review month falls within placement duration
+    const placementStartMonth = targetPlacement.startDate.slice(0, 7);
+    const placementEndMonth = targetPlacement.endDate.slice(0, 7);
+    if (reviewMonth < placementStartMonth || reviewMonth > placementEndMonth) {
+      return {
+        success: false,
+        error: `Review month (${reviewMonth}) must fall within the placement duration (${placementStartMonth} to ${placementEndMonth}).`,
       };
     }
 
