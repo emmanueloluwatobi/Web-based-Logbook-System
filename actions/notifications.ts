@@ -1,6 +1,6 @@
 "use server";
 
-import { eq, and, inArray, desc } from "drizzle-orm";
+import { eq, and, inArray, desc, gte } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   placement,
@@ -8,6 +8,7 @@ import {
   user,
   department,
   logbookEntry,
+  notificationLog,
 } from "@/db/schema";
 import { sendOverdueSummaryEmail, logNotification } from "@/lib/resend";
 
@@ -17,6 +18,7 @@ export interface OverdueCheckResult {
   data?: {
     departmentsProcessed: number;
     departmentsNotified: number;
+    departmentsSkippedDueToRateLimit: number;
     totalOverdueCount: number;
   };
 }
@@ -25,8 +27,13 @@ export interface OverdueCheckResult {
  * Feature 15: Scans all active placements for students who have not submitted
  * any logbook entries in the last 7+ calendar days, groups them by department,
  * and emails an inactivity digest to the departmental HOD.
+ *
+ * Includes 24-hour idempotency/rate-limiting per department to prevent spamming
+ * unless force: true is explicitly provided.
  */
-export async function triggerOverdueNotificationCheck(): Promise<OverdueCheckResult> {
+export async function triggerOverdueNotificationCheck(options?: {
+  force?: boolean;
+}): Promise<OverdueCheckResult> {
   try {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -54,6 +61,7 @@ export async function triggerOverdueNotificationCheck(): Promise<OverdueCheckRes
         data: {
           departmentsProcessed: 0,
           departmentsNotified: 0,
+          departmentsSkippedDueToRateLimit: 0,
           totalOverdueCount: 0,
         },
       };
@@ -128,6 +136,7 @@ export async function triggerOverdueNotificationCheck(): Promise<OverdueCheckRes
     }
 
     let departmentsNotified = 0;
+    let departmentsSkippedDueToRateLimit = 0;
     let totalOverdueCount = 0;
 
     // 3. For each department with overdue students, email the active HOD
@@ -150,6 +159,27 @@ export async function triggerOverdueNotificationCheck(): Promise<OverdueCheckRes
         .limit(1);
 
       if (hodUser) {
+        // Idempotency check: Has an overdue_summary already been sent to this HOD in the last 24 hours?
+        if (!options?.force) {
+          const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+          const [recentNotification] = await db
+            .select({ id: notificationLog.id })
+            .from(notificationLog)
+            .where(
+              and(
+                eq(notificationLog.userId, hodUser.id),
+                eq(notificationLog.type, "overdue_summary"),
+                gte(notificationLog.sentAt, twentyFourHoursAgo)
+              )
+            )
+            .limit(1);
+
+          if (recentNotification) {
+            departmentsSkippedDueToRateLimit++;
+            continue;
+          }
+        }
+
         try {
           await sendOverdueSummaryEmail({
             to: hodUser.email,
@@ -176,6 +206,7 @@ export async function triggerOverdueNotificationCheck(): Promise<OverdueCheckRes
       data: {
         departmentsProcessed: departmentOverdueMap.size,
         departmentsNotified,
+        departmentsSkippedDueToRateLimit,
         totalOverdueCount,
       },
     };

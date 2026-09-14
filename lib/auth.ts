@@ -27,7 +27,7 @@ export const auth = betterAuth({
         type: "string",
         required: true,
         defaultValue: "student",
-        input: true,
+        input: false, // Security: Never allow client to specify or override role
       },
       departmentId: {
         type: "string",
@@ -39,6 +39,15 @@ export const auth = betterAuth({
   databaseHooks: {
     user: {
       create: {
+        before: async (user) => {
+          // Security: Guarantee that any user created through auth flows is strictly a student
+          return {
+            data: {
+              ...user,
+              role: "student",
+            },
+          };
+        },
         after: async (user) => {
           if (user.role === "student") {
             try {

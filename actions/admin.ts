@@ -455,8 +455,19 @@ export async function createStaffUser(input: {
     revalidatePath("/admin/users");
     revalidatePath("/admin");
     return { success: true };
-  } catch (error) {
+  } catch (error: unknown) {
     console.error("[actions/admin.createStaffUser]", error);
+    const errObj = error as { code?: string; message?: string; detail?: string };
+    if (
+      errObj?.code === "23505" &&
+      (errObj?.message?.includes("unique_active_hod_per_department") ||
+        errObj?.detail?.includes("unique_active_hod_per_department"))
+    ) {
+      return {
+        success: false,
+        error: "This department already has an active Head of Department (HOD). Each department may only have one active HOD.",
+      };
+    }
     return { success: false, error: "Failed to create staff account and dispatch invite." };
   }
 }

@@ -52,7 +52,6 @@ export function RegisterForm({ departments }: RegisterFormProps) {
         name: name.trim(),
         email: email.trim().toLowerCase(),
         password,
-        role: "student",
         departmentId,
       });
 

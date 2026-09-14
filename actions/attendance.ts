@@ -147,39 +147,8 @@ export async function logAttendance(formData: FormData): Promise<AttendanceMutat
       return { success: true, data: updated };
     }
 
-    // Check if an attendance record already exists for this exact date
-    const [existingDate] = await db
-      .select({ id: attendance.id })
-      .from(attendance)
-      .where(
-        and(
-          eq(attendance.studentId, profile.id),
-          eq(attendance.date, date)
-        )
-      )
-      .limit(1);
-
-    if (existingDate) {
-      // Update existing date record
-      const [updated] = await db
-        .update(attendance)
-        .set({
-          checkIn,
-          checkOut,
-          hours,
-          status,
-        })
-        .where(eq(attendance.id, existingDate.id))
-        .returning();
-
-      revalidatePath("/student/attendance");
-      revalidatePath("/student");
-
-      return { success: true, data: updated };
-    }
-
-    // Insert new attendance record
-    const [created] = await db
+    // Atomic Upsert: insert new attendance record or update existing on date conflict
+    const [saved] = await db
       .insert(attendance)
       .values({
         studentId: profile.id,
@@ -190,12 +159,21 @@ export async function logAttendance(formData: FormData): Promise<AttendanceMutat
         hours,
         status,
       })
+      .onConflictDoUpdate({
+        target: [attendance.studentId, attendance.date],
+        set: {
+          checkIn,
+          checkOut,
+          hours,
+          status,
+        },
+      })
       .returning();
 
     revalidatePath("/student/attendance");
     revalidatePath("/student");
 
-    return { success: true, data: created };
+    return { success: true, data: saved };
   } catch (error) {
     console.error("[actions/attendance.logAttendance]", error);
     return { success: false, error: "Failed to log attendance." };
