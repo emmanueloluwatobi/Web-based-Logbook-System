@@ -12,6 +12,7 @@ import {
   logbookEntry,
 } from "@/db/schema";
 import { auth } from "@/lib/auth";
+import { sendPlacementApprovedEmail, logNotification } from "@/lib/resend";
 
 export interface PlacementMutationResult<T = unknown> {
   success: boolean;
@@ -111,6 +112,71 @@ async function assertStudent() {
   }
 
   return { error: null, session, profile };
+}
+
+/**
+ * Feature 15: Dispatches placement_approved notification to student.
+ */
+async function notifyStudentOfApprovedPlacement({
+  studentProfileId,
+  organizationId,
+  schoolSupervisorId,
+  startDate,
+  endDate,
+}: {
+  studentProfileId: string;
+  organizationId: string;
+  schoolSupervisorId?: string | null;
+  startDate: string;
+  endDate: string;
+}): Promise<void> {
+  try {
+    const [studentData] = await db
+      .select({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+      })
+      .from(studentProfile)
+      .innerJoin(user, eq(studentProfile.userId, user.id))
+      .where(eq(studentProfile.id, studentProfileId))
+      .limit(1);
+
+    if (!studentData) return;
+
+    const [org] = await db
+      .select({ name: organization.name })
+      .from(organization)
+      .where(eq(organization.id, organizationId))
+      .limit(1);
+
+    let supervisorName: string | null = null;
+    if (schoolSupervisorId) {
+      const [sup] = await db
+        .select({ name: user.name })
+        .from(user)
+        .where(eq(user.id, schoolSupervisorId))
+        .limit(1);
+      if (sup) supervisorName = sup.name;
+    }
+
+    await sendPlacementApprovedEmail({
+      to: studentData.email,
+      studentName: studentData.name,
+      organizationName: org?.name || "Your Approved Organization",
+      supervisorName,
+      startDate,
+      endDate,
+    });
+
+    await logNotification({
+      userId: studentData.id,
+      type: "placement_approved",
+      message: `SIWES Placement approved at ${org?.name || "organization"} (${startDate} to ${endDate}).`,
+    });
+  } catch (error) {
+    console.error("[actions/placement.notifyStudentOfApprovedPlacement] Failed to dispatch placement approval notification:", error);
+  }
 }
 
 // ==========================================
@@ -403,6 +469,15 @@ export async function approveStudentPlacement(formData: FormData): Promise<Place
       .where(eq(placement.id, placementId))
       .returning();
 
+    // Feature 15: Notify student of approved placement
+    await notifyStudentOfApprovedPlacement({
+      studentProfileId: updated.studentId,
+      organizationId: updated.organizationId,
+      schoolSupervisorId: updated.schoolSupervisorId,
+      startDate: updated.startDate,
+      endDate: updated.endDate,
+    });
+
     revalidatePath("/admin/placements");
     revalidatePath("/student/placement");
     revalidatePath("/student");
@@ -516,6 +591,15 @@ export async function createDepartmentPlacement(formData: FormData): Promise<Pla
         status: "active",
       })
       .returning();
+
+    // Feature 15: Notify student of approved placement
+    await notifyStudentOfApprovedPlacement({
+      studentProfileId: created.studentId,
+      organizationId: created.organizationId,
+      schoolSupervisorId: created.schoolSupervisorId,
+      startDate: created.startDate,
+      endDate: created.endDate,
+    });
 
     revalidatePath("/admin/placements");
     revalidatePath("/student/placement");

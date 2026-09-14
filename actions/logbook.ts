@@ -14,6 +14,7 @@ import {
 } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { uploadLogbookAttachment } from "@/lib/supabase-storage";
+import { sendEntrySubmittedEmail, logNotification } from "@/lib/resend";
 
 async function assertStudent() {
   const session = await auth.api.getSession({
@@ -144,6 +145,65 @@ async function ensureStudentPlacement(profileId: string) {
   return newPlacement;
 }
 
+/**
+ * Feature 15: Notifies the assigned School Supervisor when a student submits an entry.
+ */
+async function notifySupervisorOfSubmission({
+  studentProfileId,
+  studentName,
+  entryDate,
+}: {
+  studentProfileId: string;
+  studentName: string;
+  entryDate: string;
+}): Promise<void> {
+  try {
+    const [activePlacement] = await db
+      .select({
+        schoolSupervisorId: placement.schoolSupervisorId,
+      })
+      .from(placement)
+      .where(
+        and(
+          eq(placement.studentId, studentProfileId),
+          eq(placement.status, "active")
+        )
+      )
+      .limit(1);
+
+    if (!activePlacement || !activePlacement.schoolSupervisorId) return;
+
+    const [supervisorUser] = await db
+      .select({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+      })
+      .from(user)
+      .where(eq(user.id, activePlacement.schoolSupervisorId))
+      .limit(1);
+
+    if (!supervisorUser) return;
+
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    await sendEntrySubmittedEmail({
+      to: supervisorUser.email,
+      supervisorName: supervisorUser.name,
+      studentName,
+      entryDate,
+      reviewUrl: `${baseUrl}/supervisor/students/${studentProfileId}`,
+    });
+
+    await logNotification({
+      userId: supervisorUser.id,
+      type: "entry_submitted",
+      message: `${studentName} submitted a logbook entry for ${entryDate}.`,
+    });
+  } catch (error) {
+    console.error("[actions/logbook.notifySupervisorOfSubmission] Failed to dispatch submission notification:", error);
+  }
+}
+
 
 export interface VersionChainItem {
   id: string;
@@ -181,8 +241,8 @@ export interface EntryMutationResult {
  */
 export async function createEntry(formData: FormData): Promise<EntryMutationResult> {
   try {
-    const { error: authError, profile } = await assertStudent();
-    if (authError || !profile) {
+    const { error: authError, profile, session } = await assertStudent();
+    if (authError || !profile || !session) {
       return { success: false, error: authError || "Unauthorized" };
     }
 
@@ -259,6 +319,15 @@ export async function createEntry(formData: FormData): Promise<EntryMutationResu
         versionNumber: 1,
       })
       .returning();
+
+    // Feature 15: If submitted immediately, notify assigned supervisor
+    if (!isDraft) {
+      await notifySupervisorOfSubmission({
+        studentProfileId: profile.id,
+        studentName: session.user.name,
+        entryDate: created.entryDate,
+      });
+    }
 
     revalidatePath("/student/logbook");
     revalidatePath("/student");
@@ -404,8 +473,8 @@ export async function updateEntry(formData: FormData): Promise<EntryMutationResu
  */
 export async function submitEntry(entryId: string): Promise<EntryMutationResult> {
   try {
-    const { error: authError, profile } = await assertStudent();
-    if (authError || !profile) {
+    const { error: authError, profile, session } = await assertStudent();
+    if (authError || !profile || !session) {
       return { success: false, error: authError || "Unauthorized" };
     }
 
@@ -450,6 +519,13 @@ export async function submitEntry(entryId: string): Promise<EntryMutationResult>
       .where(eq(logbookEntry.id, existing.id))
       .returning();
 
+    // Feature 15: Notify assigned supervisor
+    await notifySupervisorOfSubmission({
+      studentProfileId: profile.id,
+      studentName: session.user.name,
+      entryDate: updated.entryDate,
+    });
+
     revalidatePath("/student/logbook");
     revalidatePath(`/student/logbook/${existing.id}`);
     revalidatePath("/student");
@@ -482,8 +558,8 @@ export async function resubmitEntry(
   optionalFormData?: FormData
 ): Promise<EntryMutationResult> {
   try {
-    const { error: authError, profile } = await assertStudent();
-    if (authError || !profile) {
+    const { error: authError, profile, session } = await assertStudent();
+    if (authError || !profile || !session) {
       return { success: false, error: authError || "Unauthorized" };
     }
 
@@ -616,6 +692,13 @@ export async function resubmitEntry(
         submittedAt: new Date(),
       })
       .returning();
+
+    // Feature 15: Notify assigned supervisor of resubmission
+    await notifySupervisorOfSubmission({
+      studentProfileId: profile.id,
+      studentName: session.user.name,
+      entryDate: created.entryDate,
+    });
 
     revalidatePath("/student/logbook");
     revalidatePath(`/student/logbook/${original.id}`);

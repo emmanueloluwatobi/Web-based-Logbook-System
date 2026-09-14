@@ -259,6 +259,7 @@ export const notificationLog = pgTable("notification_log", {
     .references(() => user.id, { onDelete: "cascade" }),
   type: text("type", {
     enum: [
+      "welcome_student",
       "entry_rejected",
       "entry_submitted",
       "overdue_summary",

@@ -8,8 +8,11 @@ import {
   logbookEntry,
   placement,
   supervisorFeedback,
+  studentProfile,
+  user,
 } from "@/db/schema";
 import { auth } from "@/lib/auth";
+import { sendEntryRejectedEmail, logNotification } from "@/lib/resend";
 
 async function assertSupervisor(): Promise<{
   error: string | null;
@@ -172,6 +175,39 @@ export async function rejectEntry(
         comment: comment.trim(),
       });
     });
+
+    // Feature 15: Send entry_rejected notification to student
+    try {
+      const [studentUser] = await db
+        .select({
+          id: user.id,
+          name: user.name,
+          email: user.email,
+        })
+        .from(studentProfile)
+        .innerJoin(user, eq(studentProfile.userId, user.id))
+        .where(eq(studentProfile.id, entry.studentId))
+        .limit(1);
+
+      if (studentUser) {
+        const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+        await sendEntryRejectedEmail({
+          to: studentUser.email,
+          studentName: studentUser.name,
+          entryDate: entry.entryDate,
+          comment: comment.trim(),
+          entryUrl: `${baseUrl}/student/logbook/${entry.id}`,
+        });
+
+        await logNotification({
+          userId: studentUser.id,
+          type: "entry_rejected",
+          message: `Correction requested for entry on ${entry.entryDate}: "${comment.trim()}"`,
+        });
+      }
+    } catch (emailErr) {
+      console.error("[actions/review.rejectEntry] Failed to dispatch correction email:", emailErr);
+    }
 
     revalidatePath("/supervisor");
     revalidatePath(`/supervisor/students/${entry.studentId}`);

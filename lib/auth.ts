@@ -2,10 +2,11 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
 import { magicLink } from "better-auth/plugins";
+import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import * as schema from "@/db/schema";
-import { studentProfile } from "@/db/schema";
-import { sendMagicLinkEmail } from "@/lib/resend";
+import { studentProfile, department } from "@/db/schema";
+import { sendMagicLinkEmail, sendStudentWelcomeEmail, logNotification } from "@/lib/resend";
 
 export const auth = betterAuth({
   database: drizzleAdapter(db, { provider: "pg", schema }),
@@ -53,6 +54,34 @@ export const auth = betterAuth({
               });
             } catch (error) {
               console.error("[lib/auth.databaseHooks.user.create.after] Failed to create student profile:", error);
+            }
+
+            // Feature 15: Send Student Welcome Email & log notification
+            try {
+              let departmentName: string | null = null;
+              const deptId = (user as Record<string, unknown>).departmentId;
+              if (typeof deptId === "string" && deptId) {
+                const [dept] = await db
+                  .select({ name: department.name })
+                  .from(department)
+                  .where(eq(department.id, deptId))
+                  .limit(1);
+                if (dept) departmentName = dept.name;
+              }
+
+              await sendStudentWelcomeEmail({
+                to: user.email,
+                name: user.name,
+                departmentName,
+              });
+
+              await logNotification({
+                userId: user.id,
+                type: "welcome_student",
+                message: `Welcome email dispatched to ${user.email}.`,
+              });
+            } catch (notifyError) {
+              console.error("[lib/auth.databaseHooks.user.create.after] Failed to send welcome email:", notifyError);
             }
           }
         },
