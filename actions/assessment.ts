@@ -49,7 +49,8 @@ async function assertStaff() {
 }
 
 /**
- * Ensures caller is an authenticated Industry Supervisor.
+ * Ensures caller is an authenticated Industry Supervisor with at least one
+ * valid placement assignment in the university database.
  */
 async function assertIndustrySupervisor() {
   const session = await auth.api.getSession({
@@ -67,13 +68,28 @@ async function assertIndustrySupervisor() {
     };
   }
 
+  // Security Invariant: Verify valid/active placement assignment
+  const [assignedPlacement] = await db
+    .select({ id: placement.id })
+    .from(placement)
+    .where(eq(placement.industrySupervisorId, session.user.id))
+    .limit(1);
+
+  if (!assignedPlacement) {
+    return {
+      error: "No student placement assignments found for this Industry Supervisor account.",
+      session: null,
+    };
+  }
+
   return { error: null, session };
 }
 
 /**
- * Verifies that an email belongs to an existing Industry Supervisor before
- * initiating passwordless OTP / magic link authentication flows.
- * Prevents arbitrary emails or student/staff accounts from using the industry login portal.
+ * Verifies that an email belongs to an existing Industry Supervisor with an active
+ * student placement assignment before initiating passwordless OTP / magic link authentication flows.
+ *
+ * Security Model: Exists → Industry Supervisor role → valid/active assignment → authenticated → access granted
  */
 export async function verifyIndustrySupervisorEmail(
   email: string,
@@ -87,6 +103,7 @@ export async function verifyIndustrySupervisorEmail(
       };
     }
 
+    // 1. Exists?
     const [foundUser] = await db
       .select({ id: user.id, role: user.role, name: user.name })
       .from(user)
@@ -97,10 +114,11 @@ export async function verifyIndustrySupervisorEmail(
       return {
         success: false,
         error:
-          "This email address is not registered as an Industry Supervisor. Please verify that your student's placement has been submitted and approved with this email, or contact the departmental SIWES coordinator.",
+          "This email address is not registered as an Industry Supervisor. Only workplace mentors assigned by the university can access this portal.",
       };
     }
 
+    // 2. Industry Supervisor role?
     if (foundUser.role !== "industry_supervisor") {
       const roleLabel =
         foundUser.role === "student"
@@ -113,6 +131,21 @@ export async function verifyIndustrySupervisorEmail(
       return {
         success: false,
         error: `This email is registered as a ${roleLabel} account. The Industry Portal is reserved exclusively for external workplace mentors. Please use the Student & Staff login page.`,
+      };
+    }
+
+    // 3. Valid / active placement assignment?
+    const [assignedPlacement] = await db
+      .select({ id: placement.id, status: placement.status })
+      .from(placement)
+      .where(eq(placement.industrySupervisorId, foundUser.id))
+      .limit(1);
+
+    if (!assignedPlacement) {
+      return {
+        success: false,
+        error:
+          "No student placement assignments were found for this Industry Supervisor account. Please ensure that your student's placement has been registered and approved by the department before signing in.",
       };
     }
 

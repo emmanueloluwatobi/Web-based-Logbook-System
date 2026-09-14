@@ -44,6 +44,21 @@ export function IndustryDashboardView({
           <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-gradient-to-l from-primary/5 to-transparent pointer-events-none hidden md:block" />
         </div>
 
+        {/* Unassigned Warning Banner */}
+        {totalAssigned === 0 && (
+          <div className="rounded-xl bg-amber-50 border border-amber-200/80 p-4 text-xs text-amber-900 flex items-start gap-3 shadow-xs">
+            <AlertCircle className="size-5 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <h3 className="font-semibold text-sm text-amber-950 font-heading">
+                No Active Student Placements Assigned
+              </h3>
+              <p className="mt-1 text-amber-800 leading-relaxed font-sans">
+                Your supervisor account is registered, but there are currently no approved Ekiti State University SIWES student placements linked to your supervision. Once your student registers their industrial attachment and the department confirms your assignment, your interns will automatically appear here.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* 3 Metric Stat Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="bg-surface-container-lowest rounded-xl border border-outline-variant/60 p-5 shadow-xs">
