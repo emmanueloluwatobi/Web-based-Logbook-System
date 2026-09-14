@@ -117,10 +117,19 @@ export async function assignIndustrySupervisor(input: {
       return { success: false, error: "Placement record not found." };
     }
 
-    // HOD department check
-    if (session.user.role === "hod" && session.user.departmentId) {
+    // HOD department check: enforce that HOD callers must have a department attached
+    if (session.user.role === "hod") {
+      if (!session.user.departmentId) {
+        return {
+          success: false,
+          error: "Your HOD account is not attached to any academic department.",
+        };
+      }
       if (targetPlacement.departmentId !== session.user.departmentId) {
-        return { success: false, error: "You can only manage placements within your own department." };
+        return {
+          success: false,
+          error: "You can only manage placements within your own department.",
+        };
       }
     }
 
@@ -133,14 +142,26 @@ export async function assignIndustrySupervisor(input: {
       .limit(1);
 
     if (existingUser) {
-      supervisorUserId = existingUser.id;
-      // If user exists without elevated staff role, ensure role is industry_supervisor
-      if (existingUser.role !== "admin" && existingUser.role !== "hod" && existingUser.role !== "school_supervisor") {
-        await db
-          .update(user)
-          .set({ role: "industry_supervisor", name })
-          .where(eq(user.id, existingUser.id));
+      // Security: Never promote a student or staff account to industry_supervisor implicitly
+      if (existingUser.role !== "industry_supervisor") {
+        const roleLabel =
+          existingUser.role === "student"
+            ? "student"
+            : existingUser.role === "school_supervisor"
+              ? "school supervisor"
+              : "staff member";
+        return {
+          success: false,
+          error: `This email address is already registered to a ${roleLabel}. Industry supervisors must use a distinct corporate email address.`,
+        };
       }
+
+      supervisorUserId = existingUser.id;
+      // Update name in case it changed
+      await db
+        .update(user)
+        .set({ name })
+        .where(eq(user.id, existingUser.id));
     } else {
       // Create new passwordless industry_supervisor user
       supervisorUserId = crypto.randomUUID();
@@ -262,37 +283,8 @@ export async function submitMonthlyReview(formData: FormData): Promise<Assessmen
 
     const typedScores = scoresObj as RubricScores;
 
-    // Check if review already exists for this placement and month
-    const [existingReview] = await db
-      .select({ id: monthlyIndustryReview.id })
-      .from(monthlyIndustryReview)
-      .where(
-        and(
-          eq(monthlyIndustryReview.placementId, placementId),
-          eq(monthlyIndustryReview.reviewMonth, reviewMonth)
-        )
-      )
-      .limit(1);
-
-    if (existingReview) {
-      const [updated] = await db
-        .update(monthlyIndustryReview)
-        .set({
-          scores: typedScores,
-          comment,
-          attestationName,
-          attestationOfficeId,
-          reviewedAt: new Date(),
-        })
-        .where(eq(monthlyIndustryReview.id, existingReview.id))
-        .returning();
-
-      revalidatePath("/industry");
-      revalidatePath(`/industry/review/${placementId}`);
-      return { success: true, data: updated };
-    }
-
-    const [created] = await db
+    // Atomic upsert backed by unique constraint (placement_id, review_month)
+    const [savedReview] = await db
       .insert(monthlyIndustryReview)
       .values({
         placementId,
@@ -303,13 +295,33 @@ export async function submitMonthlyReview(formData: FormData): Promise<Assessmen
         attestationName,
         attestationOfficeId,
       })
+      .onConflictDoUpdate({
+        target: [
+          monthlyIndustryReview.placementId,
+          monthlyIndustryReview.reviewMonth,
+        ],
+        set: {
+          scores: typedScores,
+          comment,
+          attestationName,
+          attestationOfficeId,
+          reviewedAt: new Date(),
+        },
+      })
       .returning();
 
     revalidatePath("/industry");
     revalidatePath(`/industry/review/${placementId}`);
 
-    return { success: true, data: created };
-  } catch (error) {
+    return { success: true, data: savedReview };
+  } catch (error: unknown) {
+    const err = error as { code?: string };
+    if (err?.code === "23505") {
+      return {
+        success: false,
+        error: "A concurrent monthly evaluation for this period is already being processed.",
+      };
+    }
     console.error("[actions/assessment.submitMonthlyReview]", error);
     return { success: false, error: "Failed to save monthly evaluation. Please try again." };
   }

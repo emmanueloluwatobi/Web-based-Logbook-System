@@ -1,0 +1,1 @@
+ALTER TABLE "monthly_industry_review" ADD CONSTRAINT "unique_monthly_industry_review_placement_month" UNIQUE("placement_id","review_month");

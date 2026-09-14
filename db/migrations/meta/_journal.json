@@ -43,6 +43,13 @@
       "when": 1789407887556,
       "tag": "0005_light_mad_thinker",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789419126806,
+      "tag": "0006_serious_thunderball",
+      "breakpoints": true
     }
   ]
 }
