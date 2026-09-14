@@ -396,7 +396,9 @@ export async function createStaffUser(input: {
       return { success: false, error: `A user with email ${email} already exists.` };
     }
 
-    // One active HOD per department — soft block per project-overview.md invariant
+    // One active HOD per department — optimistic pre-check for friendly UI feedback.
+    // Note: Concurrency and correctness are strictly guaranteed at the database layer
+    // by the partial unique index `unique_active_hod_per_department` on user(department_id) WHERE role = 'hod'.
     if (role === "hod" && departmentId) {
       const [existingHod] = await db
         .select({ id: schema.user.id, name: schema.user.name })
@@ -458,10 +460,12 @@ export async function createStaffUser(input: {
   } catch (error: unknown) {
     console.error("[actions/admin.createStaffUser]", error);
     const errObj = error as { code?: string; message?: string; detail?: string };
+    const errString = String(error);
     if (
-      errObj?.code === "23505" &&
-      (errObj?.message?.includes("unique_active_hod_per_department") ||
-        errObj?.detail?.includes("unique_active_hod_per_department"))
+      errObj?.code === "23505" ||
+      errString.includes("unique_active_hod_per_department") ||
+      errObj?.detail?.includes("unique_active_hod_per_department") ||
+      errObj?.message?.includes("unique_active_hod_per_department")
     ) {
       return {
         success: false,

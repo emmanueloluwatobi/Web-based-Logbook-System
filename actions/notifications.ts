@@ -50,16 +50,25 @@ export async function triggerOverdueNotificationCheck(
     let callerDepartmentId: string | null = null;
 
     const validCronSecret = process.env.CRON_SECRET;
+    const incomingHeaders = await headers();
+    const authHeader = incomingHeaders.get("authorization");
+    const customHeader = incomingHeaders.get("x-cron-secret");
+
+    const candidateSecret =
+      options?.cronSecret ||
+      (authHeader?.startsWith("Bearer ") ? authHeader.slice(7).trim() : null) ||
+      customHeader;
+
     if (
-      options?.cronSecret &&
       validCronSecret &&
-      options.cronSecret === validCronSecret
+      candidateSecret &&
+      candidateSecret === validCronSecret
     ) {
       isAuthorized = true;
       callerRole = "cron";
     } else {
       const session = await auth.api.getSession({
-        headers: await headers(),
+        headers: incomingHeaders,
       });
 
       if (session?.user && (session.user.role === "admin" || session.user.role === "hod")) {

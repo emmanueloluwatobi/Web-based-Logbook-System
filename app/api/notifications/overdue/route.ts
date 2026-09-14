@@ -67,9 +67,10 @@ export async function GET(req: NextRequest) {
     const result = await triggerOverdueNotificationCheck({ force, cronSecret });
 
     if (!result.success) {
+      const isUnauth = result.error?.toLowerCase().includes("unauthorized");
       return NextResponse.json(
         { success: false, error: result.error || "Failed to process overdue check." },
-        { status: 500 }
+        { status: isUnauth ? 401 : 500 }
       );
     }
     return NextResponse.json({ success: true, data: result.data });
@@ -108,9 +109,10 @@ export async function POST(req: NextRequest) {
     const result = await triggerOverdueNotificationCheck({ force, cronSecret });
 
     if (!result.success) {
+      const isUnauth = result.error?.toLowerCase().includes("unauthorized");
       return NextResponse.json(
         { success: false, error: result.error || "Failed to process overdue check." },
-        { status: 500 }
+        { status: isUnauth ? 401 : 500 }
       );
     }
     return NextResponse.json({ success: true, data: result.data });
