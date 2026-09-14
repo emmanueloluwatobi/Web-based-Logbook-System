@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { toast } from "sonner";
+import { verifyIndustrySupervisorEmail } from "@/actions/assessment";
 
 export function IndustryLoginForm() {
   const router = useRouter();
@@ -37,7 +38,15 @@ export function IndustryLoginForm() {
 
     setLoading(true);
     try {
-      // Send both OTP code and Magic Link for maximum user convenience
+      // 1. Pre-flight verification: ensure email is registered as an Industry Supervisor
+      const check = await verifyIndustrySupervisorEmail(cleanEmail);
+      if (!check.success) {
+        setErrorMessage(check.error || "This email is not authorized for Industry Supervisor access.");
+        setLoading(false);
+        return;
+      }
+
+      // 2. Dispatch OTP and Magic Link only for verified industry supervisors
       const [otpRes, magicRes] = await Promise.allSettled([
         authClient.emailOtp.sendVerificationOtp({
           email: cleanEmail,
@@ -91,6 +100,16 @@ export function IndustryLoginForm() {
 
       if (res.error) {
         setErrorMessage(res.error.message || "Invalid or expired verification code.");
+        setVerifying(false);
+        return;
+      }
+
+      // 3. Security: verify that the authenticated account has industry_supervisor role
+      const session = await authClient.getSession();
+      const userRole = session?.data?.user?.role;
+      if (userRole && userRole !== "industry_supervisor") {
+        await authClient.signOut();
+        setErrorMessage("Access denied: this account does not have Industry Supervisor privileges.");
         setVerifying(false);
         return;
       }

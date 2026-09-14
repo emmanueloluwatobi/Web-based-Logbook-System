@@ -21,11 +21,13 @@ export const auth = betterAuth({
   plugins: [
     nextCookies(),
     magicLink({
+      disableSignUp: true,
       sendMagicLink: async ({ email, url }) => {
         await sendMagicLinkEmail(email, url);
       },
     }),
     emailOTP({
+      disableSignUp: true,
       sendVerificationOTP: async ({ email, otp }) => {
         await sendOTPEmail(email, otp);
       },

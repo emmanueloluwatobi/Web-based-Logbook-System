@@ -7,6 +7,7 @@ import {
   calculateFinalGrade,
 } from "../lib/utils";
 import { escapeHtml } from "../lib/resend";
+import { auth } from "../lib/auth";
 
 test("RUBRIC_WEIGHTS sum to exactly 1.0 (100%)", () => {
   const sum = Object.values(RUBRIC_WEIGHTS).reduce((acc, weight) => acc + weight, 0);
@@ -86,4 +87,20 @@ test("escapeHtml: safely sanitizes HTML injection and special characters", () =>
   assert.strictEqual(escapeHtml(undefined), "");
   assert.strictEqual(escapeHtml("John Doe"), "John Doe");
 });
+
+test("auth configuration: emailOTP and magicLink plugins exist and role input is forbidden", () => {
+  const plugins = auth.options.plugins;
+  assert.ok(plugins && plugins.length >= 2, "Plugins must be registered on auth");
+  const pluginIds = plugins.map((p) => p.id);
+  assert.ok(pluginIds.includes("email-otp"), "email-otp plugin must be installed");
+  assert.ok(pluginIds.includes("magic-link"), "magic-link plugin must be installed");
+
+  // Verify client role input is explicitly disabled in user schema
+  assert.strictEqual(
+    (auth.options.user?.additionalFields as Record<string, { input?: boolean }>)?.role?.input,
+    false,
+    "Client input for user role must be disabled"
+  );
+});
+
 

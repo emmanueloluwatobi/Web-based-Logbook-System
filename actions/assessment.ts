@@ -71,6 +71,62 @@ async function assertIndustrySupervisor() {
 }
 
 /**
+ * Verifies that an email belongs to an existing Industry Supervisor before
+ * initiating passwordless OTP / magic link authentication flows.
+ * Prevents arbitrary emails or student/staff accounts from using the industry login portal.
+ */
+export async function verifyIndustrySupervisorEmail(
+  email: string,
+): Promise<AssessmentActionResult<{ exists: boolean }>> {
+  try {
+    const cleanEmail = email?.trim().toLowerCase();
+    if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      return {
+        success: false,
+        error: "Please enter a valid corporate email address.",
+      };
+    }
+
+    const [foundUser] = await db
+      .select({ id: user.id, role: user.role, name: user.name })
+      .from(user)
+      .where(eq(user.email, cleanEmail))
+      .limit(1);
+
+    if (!foundUser) {
+      return {
+        success: false,
+        error:
+          "This email address is not registered as an Industry Supervisor. Please verify that your student's placement has been submitted and approved with this email, or contact the departmental SIWES coordinator.",
+      };
+    }
+
+    if (foundUser.role !== "industry_supervisor") {
+      const roleLabel =
+        foundUser.role === "student"
+          ? "Student"
+          : foundUser.role === "school_supervisor"
+            ? "Academic Supervisor"
+            : foundUser.role === "hod"
+              ? "Head of Department"
+              : "Administrative Staff";
+      return {
+        success: false,
+        error: `This email is registered as a ${roleLabel} account. The Industry Portal is reserved exclusively for external workplace mentors. Please use the Student & Staff login page.`,
+      };
+    }
+
+    return { success: true, data: { exists: true } };
+  } catch (err) {
+    console.error("[verifyIndustrySupervisorEmail] Error:", err);
+    return {
+      success: false,
+      error: "An unexpected error occurred while verifying supervisor email. Please try again.",
+    };
+  }
+}
+
+/**
  * Assigns or updates an Industry Supervisor on a student's placement,
  * creates the passwordless user account if not existing, and sends an invitation email.
  */
