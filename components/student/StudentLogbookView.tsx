@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
@@ -30,11 +30,13 @@ export function StudentLogbookView({
   // Default view is "create" (Add Daily Activity), unless ?view=all is specified
   const initialView = searchParams.get("view") === "all" ? "all" : "create";
   const [activeView, setActiveView] = useState<"create" | "all">(initialView);
+  const [prevInitialEntries, setPrevInitialEntries] = useState(initialEntries);
   const [entries, setEntries] = useState<LogbookEntryItem[]>(initialEntries);
 
-  useEffect(() => {
+  if (initialEntries !== prevInitialEntries) {
+    setPrevInitialEntries(initialEntries);
     setEntries(initialEntries);
-  }, [initialEntries]);
+  }
 
   const handleViewChange = (view: "create" | "all") => {
     setActiveView(view);

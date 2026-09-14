@@ -8,9 +8,7 @@ import {
   UserCheck,
   MapPin,
   ShieldCheck,
-  ArrowUpRight,
 } from "lucide-react";
-import Link from "next/link";
 
 interface PlacementSummaryCardProps {
   organizationName?: string;

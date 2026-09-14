@@ -4,7 +4,7 @@ import { headers } from "next/headers";
 import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { studentProfile, department, user } from "@/db/schema";
+import { studentProfile, department } from "@/db/schema";
 import { StudentDashboardView } from "@/components/student/StudentDashboardView";
 
 export const metadata: Metadata = {

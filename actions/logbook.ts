@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { headers } from "next/headers";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db";
 import {
   studentProfile,
@@ -10,9 +10,11 @@ import {
   placement,
   organization,
   user,
+  supervisorFeedback,
 } from "@/db/schema";
 import { auth } from "@/lib/auth";
 import { uploadLogbookAttachment } from "@/lib/supabase-storage";
+import { sendEntrySubmittedEmail, logNotification } from "@/lib/resend";
 
 async function assertStudent() {
   const session = await auth.api.getSession({
@@ -75,6 +77,22 @@ async function ensureStudentPlacement(profileId: string) {
     return existingPlacement;
   }
 
+  // Check if student has a pending placement awaiting approval
+  const [pendingPlacement] = await db
+    .select()
+    .from(placement)
+    .where(
+      and(
+        eq(placement.studentId, profileId),
+        eq(placement.status, "pending")
+      )
+    )
+    .limit(1);
+
+  if (pendingPlacement) {
+    return null;
+  }
+
   // Find or create default placement organization
   let [defaultOrg] = await db
     .select()
@@ -127,6 +145,85 @@ async function ensureStudentPlacement(profileId: string) {
   return newPlacement;
 }
 
+/**
+ * Feature 15: Notifies the assigned School Supervisor when a student submits an entry.
+ */
+async function notifySupervisorOfSubmission({
+  studentProfileId,
+  studentName,
+  entryDate,
+}: {
+  studentProfileId: string;
+  studentName: string;
+  entryDate: string;
+}): Promise<void> {
+  try {
+    const [activePlacement] = await db
+      .select({
+        schoolSupervisorId: placement.schoolSupervisorId,
+      })
+      .from(placement)
+      .where(
+        and(
+          eq(placement.studentId, studentProfileId),
+          eq(placement.status, "active")
+        )
+      )
+      .limit(1);
+
+    if (!activePlacement || !activePlacement.schoolSupervisorId) return;
+
+    const [supervisorUser] = await db
+      .select({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+      })
+      .from(user)
+      .where(eq(user.id, activePlacement.schoolSupervisorId))
+      .limit(1);
+
+    if (!supervisorUser) return;
+
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    await sendEntrySubmittedEmail({
+      to: supervisorUser.email,
+      supervisorName: supervisorUser.name,
+      studentName,
+      entryDate,
+      reviewUrl: `${baseUrl}/supervisor/students/${studentProfileId}`,
+    });
+
+    await logNotification({
+      userId: supervisorUser.id,
+      type: "entry_submitted",
+      message: `${studentName} submitted a logbook entry for ${entryDate}.`,
+    });
+  } catch (error) {
+    console.error("[actions/logbook.notifySupervisorOfSubmission] Failed to dispatch submission notification:", error);
+  }
+}
+
+
+export interface VersionChainItem {
+  id: string;
+  versionNumber: number;
+  entryDate: string;
+  status: "draft" | "submitted" | "approved" | "rejected" | "needs_correction";
+  hoursWorked: number;
+  activityDescription: string;
+  skillsGained?: string | null;
+  challenges?: string | null;
+  attachmentUrl?: string | null;
+  submittedAt?: string | null;
+  parentEntryId?: string | null;
+  feedback?: {
+    action: "approved" | "rejected";
+    comment?: string | null;
+    supervisorName?: string | null;
+    createdAt?: string | null;
+  } | null;
+}
 
 export interface EntryMutationResult {
   success: boolean;
@@ -135,7 +232,22 @@ export interface EntryMutationResult {
     id: string;
     status: string;
     entryDate: string;
+    versionNumber?: number;
   };
+}
+
+function validateHoursWorked(raw: unknown): { valid: true; hours: number } | { valid: false; error: string } {
+  if (raw === null || raw === undefined || String(raw).trim() === "") {
+    return { valid: false, error: "Hours worked is required." };
+  }
+  const num = Number(raw);
+  if (isNaN(num) || !isFinite(num)) {
+    return { valid: false, error: "Hours worked must be a valid number." };
+  }
+  if (num < 0.5 || num > 24) {
+    return { valid: false, error: "Hours worked must be between 0.5 and 24.0 hours." };
+  }
+  return { valid: true, hours: num };
 }
 
 /**
@@ -143,8 +255,8 @@ export interface EntryMutationResult {
  */
 export async function createEntry(formData: FormData): Promise<EntryMutationResult> {
   try {
-    const { error: authError, profile } = await assertStudent();
-    if (authError || !profile) {
+    const { error: authError, profile, session } = await assertStudent();
+    if (authError || !profile || !session) {
       return { success: false, error: authError || "Unauthorized" };
     }
 
@@ -167,10 +279,21 @@ export async function createEntry(formData: FormData): Promise<EntryMutationResu
       };
     }
 
-    const hoursWorked = Math.max(0.5, Math.min(24, parseFloat(String(hoursWorkedRaw)) || 8.0));
+    const hoursValidation = validateHoursWorked(hoursWorkedRaw);
+    if (!hoursValidation.valid) {
+      return { success: false, error: hoursValidation.error };
+    }
+    const hoursWorked = hoursValidation.hours;
 
     // Ensure placement exists
     const activePlacement = await ensureStudentPlacement(profile.id);
+    if (!activePlacement) {
+      return {
+        success: false,
+        error:
+          "Your placement registration is pending department approval. Daily logbook entries unlock once your placement and academic supervisor are approved.",
+      };
+    }
 
     const entryId = crypto.randomUUID();
     let attachmentUrl: string | null = null;
@@ -215,6 +338,15 @@ export async function createEntry(formData: FormData): Promise<EntryMutationResu
       })
       .returning();
 
+    // Feature 15: If submitted immediately, notify assigned supervisor
+    if (!isDraft) {
+      await notifySupervisorOfSubmission({
+        studentProfileId: profile.id,
+        studentName: session.user.name,
+        entryDate: created.entryDate,
+      });
+    }
+
     revalidatePath("/student/logbook");
     revalidatePath("/student");
 
@@ -234,7 +366,8 @@ export async function createEntry(formData: FormData): Promise<EntryMutationResu
 
 /**
  * Update an existing logbook entry.
- * Invariant: Only allowed while status is 'draft' or 'needs_correction'.
+ * Invariant: Only allowed while status is 'draft'.
+ * Entries requiring correction must go through resubmitEntry instead.
  * Locked from editing once submitted until a supervisor acts.
  */
 export async function updateEntry(formData: FormData): Promise<EntryMutationResult> {
@@ -265,11 +398,14 @@ export async function updateEntry(formData: FormData): Promise<EntryMutationResu
       return { success: false, error: "Logbook entry not found" };
     }
 
-    // Enforce lock invariant
-    if (existing.status !== "draft" && existing.status !== "needs_correction") {
+    // Enforce lock invariant: strictly draft entries only
+    if (existing.status !== "draft") {
       return {
         success: false,
-        error: "This entry is submitted or reviewed and is locked from editing.",
+        error:
+          existing.status === "needs_correction"
+            ? "Entries requiring correction cannot be edited in-place. Please resubmit as a new version."
+            : "This entry has been submitted or reviewed and is locked from editing.",
       };
     }
 
@@ -289,9 +425,16 @@ export async function updateEntry(formData: FormData): Promise<EntryMutationResu
         : existing.challenges;
     const attachmentFile = formData.get("attachment") as File | null;
 
-    const hoursWorked = hoursWorkedRaw
-      ? Math.max(0.5, Math.min(24, parseFloat(String(hoursWorkedRaw)) || 8.0))
-      : parseFloat(existing.hoursWorked);
+    let hoursWorked: number;
+    if (hoursWorkedRaw !== null && hoursWorkedRaw !== undefined && String(hoursWorkedRaw).trim() !== "") {
+      const hoursValidation = validateHoursWorked(hoursWorkedRaw);
+      if (!hoursValidation.valid) {
+        return { success: false, error: hoursValidation.error };
+      }
+      hoursWorked = hoursValidation.hours;
+    } else {
+      hoursWorked = parseFloat(existing.hoursWorked);
+    }
 
     let attachmentUrl = existing.attachmentUrl;
 
@@ -339,6 +482,7 @@ export async function updateEntry(formData: FormData): Promise<EntryMutationResu
         id: updated.id,
         status: updated.status,
         entryDate: updated.entryDate,
+        versionNumber: updated.versionNumber,
       },
     };
   } catch (error) {
@@ -348,13 +492,14 @@ export async function updateEntry(formData: FormData): Promise<EntryMutationResu
 }
 
 /**
- * Submit an existing draft or needs_correction entry for review.
+ * Submit an existing draft entry for review.
  * Sets status to 'submitted' and submittedAt to now().
+ * For entries with status 'needs_correction', use resubmitEntry instead.
  */
 export async function submitEntry(entryId: string): Promise<EntryMutationResult> {
   try {
-    const { error: authError, profile } = await assertStudent();
-    if (authError || !profile) {
+    const { error: authError, profile, session } = await assertStudent();
+    if (authError || !profile || !session) {
       return { success: false, error: authError || "Unauthorized" };
     }
 
@@ -373,10 +518,13 @@ export async function submitEntry(entryId: string): Promise<EntryMutationResult>
       return { success: false, error: "Logbook entry not found" };
     }
 
-    if (existing.status !== "draft" && existing.status !== "needs_correction") {
+    if (existing.status !== "draft") {
       return {
         success: false,
-        error: "This entry has already been submitted or finalized.",
+        error:
+          existing.status === "needs_correction"
+            ? "Entries requiring correction must be resubmitted through the correction flow."
+            : "This entry has already been submitted or finalized.",
       };
     }
 
@@ -396,6 +544,13 @@ export async function submitEntry(entryId: string): Promise<EntryMutationResult>
       .where(eq(logbookEntry.id, existing.id))
       .returning();
 
+    // Feature 15: Notify assigned supervisor
+    await notifySupervisorOfSubmission({
+      studentProfileId: profile.id,
+      studentName: session.user.name,
+      entryDate: updated.entryDate,
+    });
+
     revalidatePath("/student/logbook");
     revalidatePath(`/student/logbook/${existing.id}`);
     revalidatePath("/student");
@@ -406,10 +561,340 @@ export async function submitEntry(entryId: string): Promise<EntryMutationResult>
         id: updated.id,
         status: updated.status,
         entryDate: updated.entryDate,
+        versionNumber: updated.versionNumber,
       },
     };
   } catch (error) {
     console.error("[actions/logbook.submitEntry]", error);
     return { success: false, error: "Failed to submit logbook entry. Please try again." };
+  }
+}
+
+/**
+ * Resubmit an entry that was marked 'needs_correction'.
+ * Immutability invariant:
+ * - Creates a NEW logbook_entry row with parentEntryId = original entry's id,
+ *   versionNumber = original's versionNumber + 1, and status = 'submitted'.
+ * - The original row is NEVER edited — its status remains 'needs_correction'
+ *   permanently as the historical record.
+ */
+export async function resubmitEntry(
+  entryIdOrFormData: string | FormData,
+  optionalFormData?: FormData
+): Promise<EntryMutationResult> {
+  try {
+    const { error: authError, profile, session } = await assertStudent();
+    if (authError || !profile || !session) {
+      return { success: false, error: authError || "Unauthorized" };
+    }
+
+    let originalEntryId: string;
+    let formData: FormData | undefined;
+
+    if (typeof entryIdOrFormData === "string") {
+      originalEntryId = entryIdOrFormData;
+      formData = optionalFormData;
+    } else {
+      formData = entryIdOrFormData;
+      originalEntryId = (formData.get("originalEntryId") || formData.get("id")) as string;
+    }
+
+    if (!originalEntryId) {
+      return { success: false, error: "Original entry ID is required for resubmission." };
+    }
+
+    // Verify ownership and status of the original entry
+    const [original] = await db
+      .select()
+      .from(logbookEntry)
+      .where(
+        and(
+          eq(logbookEntry.id, originalEntryId),
+          eq(logbookEntry.studentId, profile.id)
+        )
+      )
+      .limit(1);
+
+    if (!original) {
+      return { success: false, error: "Original logbook entry not found." };
+    }
+
+    if (original.status !== "needs_correction") {
+      return {
+        success: false,
+        error: "Only entries marked as 'needs_correction' can be resubmitted.",
+      };
+    }
+
+    // Check if this entry has already been resubmitted to prevent duplicate branches
+    const [existingChild] = await db
+      .select({ id: logbookEntry.id, versionNumber: logbookEntry.versionNumber })
+      .from(logbookEntry)
+      .where(eq(logbookEntry.parentEntryId, original.id))
+      .limit(1);
+
+    if (existingChild) {
+      return {
+        success: false,
+        error: `A newer revision (Version ${existingChild.versionNumber}) has already been created for this entry.`,
+      };
+    }
+
+    // Parse updated values from formData (if provided) or fallback to original
+    const entryDate = formData ? ((formData.get("entryDate") as string) || original.entryDate) : original.entryDate;
+    const hoursWorkedRaw = formData ? formData.get("hoursWorked") : null;
+    const activityDescriptionRaw = formData ? formData.get("activityDescription") : null;
+    const skillsGainedRaw = formData ? formData.get("skillsGained") : null;
+    const challengesRaw = formData ? formData.get("challenges") : null;
+    const attachmentFile = formData ? (formData.get("attachment") as File | null) : null;
+
+    const activityDescription =
+      activityDescriptionRaw !== null && activityDescriptionRaw !== undefined
+        ? (activityDescriptionRaw as string).trim()
+        : original.activityDescription;
+
+    if (!activityDescription) {
+      return {
+        success: false,
+        error: "Activity description cannot be empty when resubmitting.",
+      };
+    }
+
+    const skillsGained =
+      skillsGainedRaw !== null && skillsGainedRaw !== undefined
+        ? (skillsGainedRaw as string).trim() || null
+        : original.skillsGained;
+
+    const challenges =
+      challengesRaw !== null && challengesRaw !== undefined
+        ? (challengesRaw as string).trim() || null
+        : original.challenges;
+
+    let hoursWorked: number;
+    if (hoursWorkedRaw !== null && hoursWorkedRaw !== undefined && String(hoursWorkedRaw).trim() !== "") {
+      const hoursValidation = validateHoursWorked(hoursWorkedRaw);
+      if (!hoursValidation.valid) {
+        return { success: false, error: hoursValidation.error };
+      }
+      hoursWorked = hoursValidation.hours;
+    } else {
+      hoursWorked = parseFloat(original.hoursWorked);
+    }
+
+    const newEntryId = crypto.randomUUID();
+    let attachmentUrl = original.attachmentUrl;
+
+    if (attachmentFile && attachmentFile.size > 0) {
+      if (attachmentFile.size > 10 * 1024 * 1024) {
+        return { success: false, error: "Attachment size must not exceed 10MB" };
+      }
+
+      const fileBuffer = Buffer.from(await attachmentFile.arrayBuffer());
+      const uploadRes = await uploadLogbookAttachment({
+        studentId: profile.id,
+        entryId: newEntryId,
+        file: fileBuffer,
+        filename: attachmentFile.name,
+        contentType: attachmentFile.type || "application/octet-stream",
+      });
+
+      if (uploadRes.error) {
+        return { success: false, error: `Attachment upload failed: ${uploadRes.error}` };
+      }
+
+      attachmentUrl = uploadRes.url || null;
+    }
+
+    // Insert new row — original row remains untouched permanently
+    const [created] = await db
+      .insert(logbookEntry)
+      .values({
+        id: newEntryId,
+        studentId: profile.id,
+        placementId: original.placementId,
+        parentEntryId: original.id,
+        versionNumber: original.versionNumber + 1,
+        entryDate,
+        activityDescription,
+        skillsGained,
+        challenges,
+        hoursWorked: String(hoursWorked.toFixed(1)),
+        attachmentUrl,
+        status: "submitted",
+        submittedAt: new Date(),
+      })
+      .returning();
+
+    // Feature 15: Notify assigned supervisor of resubmission
+    await notifySupervisorOfSubmission({
+      studentProfileId: profile.id,
+      studentName: session.user.name,
+      entryDate: created.entryDate,
+    });
+
+    revalidatePath("/student/logbook");
+    revalidatePath(`/student/logbook/${original.id}`);
+    revalidatePath(`/student/logbook/${created.id}`);
+    revalidatePath("/student");
+
+    return {
+      success: true,
+      data: {
+        id: created.id,
+        status: created.status,
+        entryDate: created.entryDate,
+        versionNumber: created.versionNumber,
+      },
+    };
+  } catch (error) {
+    console.error("[actions/logbook.resubmitEntry]", error);
+    return { success: false, error: "Failed to resubmit entry. Please try again." };
+  }
+}
+
+/**
+ * Retrieve the full version history chain for an entry (oldest to newest).
+ * Traverses parentEntryId to find root, then collects all versions in the chain.
+ */
+export async function getEntryVersionChain(entryId: string): Promise<VersionChainItem[]> {
+  try {
+    // 1. Fetch current entry with student profile, student user, and placement for authorization
+    const [current] = await db
+      .select({
+        entry: logbookEntry,
+        studentUserId: studentProfile.userId,
+        studentDepartmentId: user.departmentId,
+        placementSupervisorId: placement.schoolSupervisorId,
+      })
+      .from(logbookEntry)
+      .innerJoin(studentProfile, eq(logbookEntry.studentId, studentProfile.id))
+      .innerJoin(user, eq(studentProfile.userId, user.id))
+      .leftJoin(placement, eq(logbookEntry.placementId, placement.id))
+      .where(eq(logbookEntry.id, entryId))
+      .limit(1);
+
+    if (!current) return [];
+
+    // Authenticate and authorize caller
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session?.user) return [];
+
+    const caller = session.user;
+    const isAuthorized =
+      caller.role === "admin" ||
+      (caller.role === "student" && current.studentUserId === caller.id) ||
+      (caller.role === "school_supervisor" && current.placementSupervisorId === caller.id) ||
+      (caller.role === "hod" && Boolean(caller.departmentId) && current.studentDepartmentId === caller.departmentId);
+
+    if (!isAuthorized) {
+      return [];
+    }
+
+    // 2. Walk up parentEntryId to find the root entry
+    let root = current.entry;
+    while (root.parentEntryId) {
+      const [parent] = await db
+        .select()
+        .from(logbookEntry)
+        .where(eq(logbookEntry.id, root.parentEntryId))
+        .limit(1);
+
+      if (!parent) break;
+      root = parent;
+    }
+
+    // 3. Fetch all entries for this student and placement
+    const entriesWithFeedback = await db
+      .select({
+        entry: logbookEntry,
+        feedback: supervisorFeedback,
+        supervisorName: user.name,
+      })
+      .from(logbookEntry)
+      .leftJoin(supervisorFeedback, eq(logbookEntry.id, supervisorFeedback.entryId))
+      .leftJoin(user, eq(supervisorFeedback.supervisorId, user.id))
+      .where(
+        and(
+          eq(logbookEntry.studentId, root.studentId),
+          eq(logbookEntry.placementId, root.placementId)
+        )
+      );
+
+    // 4. Trace the linear chain starting at root
+    const chain: VersionChainItem[] = [];
+    const entryMap = new Map<string, (typeof entriesWithFeedback)[0]>();
+    const childMap = new Map<string, string>(); // parentId -> childId
+
+    for (const item of entriesWithFeedback) {
+      entryMap.set(item.entry.id, item);
+      if (item.entry.parentEntryId) {
+        childMap.set(item.entry.parentEntryId, item.entry.id);
+      }
+    }
+
+    let cursorId: string | undefined = root.id;
+    while (cursorId && entryMap.has(cursorId)) {
+      const item = entryMap.get(cursorId)!;
+      chain.push({
+        id: item.entry.id,
+        versionNumber: item.entry.versionNumber,
+        entryDate: item.entry.entryDate,
+        status: item.entry.status as
+          | "draft"
+          | "submitted"
+          | "approved"
+          | "rejected"
+          | "needs_correction",
+        hoursWorked: parseFloat(item.entry.hoursWorked) || 8.0,
+        activityDescription: item.entry.activityDescription,
+        skillsGained: item.entry.skillsGained,
+        challenges: item.entry.challenges,
+        attachmentUrl: item.entry.attachmentUrl,
+        submittedAt: item.entry.submittedAt ? item.entry.submittedAt.toISOString() : null,
+        parentEntryId: item.entry.parentEntryId,
+        feedback: item.feedback
+          ? {
+              action: item.feedback.action as "approved" | "rejected",
+              comment: item.feedback.comment,
+              supervisorName: item.supervisorName,
+              createdAt: item.feedback.createdAt.toISOString(),
+            }
+          : null,
+      });
+
+      cursorId = childMap.get(cursorId);
+    }
+
+    // If for some reason childMap didn't link everything, fallback to sorting all matching on root.id or parent chains
+    if (chain.length === 0) {
+      chain.push({
+        id: current.entry.id,
+        versionNumber: current.entry.versionNumber,
+        entryDate: current.entry.entryDate,
+        status: current.entry.status as
+          | "draft"
+          | "submitted"
+          | "approved"
+          | "rejected"
+          | "needs_correction",
+        hoursWorked: parseFloat(current.entry.hoursWorked) || 8.0,
+        activityDescription: current.entry.activityDescription,
+        skillsGained: current.entry.skillsGained,
+        challenges: current.entry.challenges,
+        attachmentUrl: current.entry.attachmentUrl,
+        submittedAt: current.entry.submittedAt ? current.entry.submittedAt.toISOString() : null,
+        parentEntryId: current.entry.parentEntryId,
+        feedback: null,
+      });
+    }
+
+    // Sort by versionNumber ascending (oldest to newest)
+    return chain.sort((a, b) => a.versionNumber - b.versionNumber);
+  } catch (error) {
+    console.error("[actions/logbook.getEntryVersionChain]", error);
+    return [];
   }
 }

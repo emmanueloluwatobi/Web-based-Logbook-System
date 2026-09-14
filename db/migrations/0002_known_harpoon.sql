@@ -1,0 +1,1 @@
+ALTER TABLE "placement" ALTER COLUMN "school_supervisor_id" DROP NOT NULL;

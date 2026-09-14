@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX "unique_active_hod_per_department" ON "user" USING btree ("department_id") WHERE "user"."role" = 'hod';--> statement-breakpoint
+ALTER TABLE "attendance" ADD CONSTRAINT "unique_attendance_student_date" UNIQUE("student_id","date");

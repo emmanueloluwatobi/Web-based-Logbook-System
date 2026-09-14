@@ -396,6 +396,29 @@ export async function createStaffUser(input: {
       return { success: false, error: `A user with email ${email} already exists.` };
     }
 
+    // One active HOD per department — optimistic pre-check for friendly UI feedback.
+    // Note: Concurrency and correctness are strictly guaranteed at the database layer
+    // by the partial unique index `unique_active_hod_per_department` on user(department_id) WHERE role = 'hod'.
+    if (role === "hod" && departmentId) {
+      const [existingHod] = await db
+        .select({ id: schema.user.id, name: schema.user.name })
+        .from(schema.user)
+        .where(
+          and(
+            eq(schema.user.role, "hod"),
+            eq(schema.user.departmentId, departmentId)
+          )
+        )
+        .limit(1);
+
+      if (existingHod) {
+        return {
+          success: false,
+          error: `This department already has an active HOD (${existingHod.name}). Remove or reassign the existing HOD before creating a new one.`,
+        };
+      }
+    }
+
     const userId = crypto.randomUUID();
     const inviteToken = crypto.randomUUID().replace(/-/g, "") + crypto.randomUUID().replace(/-/g, "");
 
@@ -434,8 +457,21 @@ export async function createStaffUser(input: {
     revalidatePath("/admin/users");
     revalidatePath("/admin");
     return { success: true };
-  } catch (error) {
+  } catch (error: unknown) {
     console.error("[actions/admin.createStaffUser]", error);
+    const errObj = error as { code?: string; message?: string; detail?: string };
+    const errString = String(error);
+    if (
+      errObj?.code === "23505" ||
+      errString.includes("unique_active_hod_per_department") ||
+      errObj?.detail?.includes("unique_active_hod_per_department") ||
+      errObj?.message?.includes("unique_active_hod_per_department")
+    ) {
+      return {
+        success: false,
+        error: "This department already has an active Head of Department (HOD). Each department may only have one active HOD.",
+      };
+    }
     return { success: false, error: "Failed to create staff account and dispatch invite." };
   }
 }

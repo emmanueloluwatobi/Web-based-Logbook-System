@@ -3,11 +3,7 @@
 import React, { useState, useTransition } from "react";
 import {
   User,
-  GraduationCap,
   Building2,
-  BookOpen,
-  Calendar,
-  Phone,
   Camera,
   CheckCircle2,
   Pencil,

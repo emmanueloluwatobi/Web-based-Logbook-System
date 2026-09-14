@@ -13,6 +13,8 @@ import {
   Calendar,
   Users,
   LayoutDashboard,
+  Briefcase,
+  Building,
 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { toast } from "sonner";
@@ -24,6 +26,8 @@ interface AdminNavbarProps {
 
 const NAV_ITEMS = [
   { label: "Overview", href: "/admin", icon: LayoutDashboard },
+  { label: "Placements", href: "/admin/placements", icon: Briefcase },
+  { label: "Organizations", href: "/admin/organizations", icon: Building },
   { label: "Departments", href: "/admin/departments", icon: Building2 },
   { label: "Programs", href: "/admin/programs", icon: BookOpen },
   { label: "Sessions", href: "/admin/sessions", icon: Calendar },

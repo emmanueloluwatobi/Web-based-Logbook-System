@@ -1,36 +1,118 @@
 import React from "react";
-import Link from "next/link";
-import { Building2, ArrowLeft } from "lucide-react";
+import type { Metadata } from "next";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
+import { eq, desc, asc } from "drizzle-orm";
+import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
+import {
+  studentProfile,
+  placement,
+  organization,
+  user,
+} from "@/db/schema";
+import {
+  StudentPlacementView,
+  type PlacementDetails,
+  type OrganizationItem,
+} from "@/components/student/StudentPlacementView";
 
-export default function StudentPlacementPage() {
+export const metadata: Metadata = {
+  title: "My Placement — ULS EKSU SIWES",
+  description: "Register and view your SIWES training placement details and assigned supervisor.",
+};
+
+export const dynamic = "force-dynamic";
+
+export default async function StudentPlacementPage() {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
+
+  if (!session || !session.user) {
+    redirect("/login");
+  }
+
+  // Retrieve student profile
+  const [profile] = await db
+    .select()
+    .from(studentProfile)
+    .where(eq(studentProfile.userId, session.user.id))
+    .limit(1);
+
+  let placementDetails: PlacementDetails | null = null;
+
+  if (profile) {
+    const [p] = await db
+      .select({
+        id: placement.id,
+        status: placement.status,
+        placementSource: placement.placementSource,
+        startDate: placement.startDate,
+        endDate: placement.endDate,
+        targetDays: placement.targetDays,
+        orgId: organization.id,
+        orgName: organization.name,
+        orgAddress: organization.address,
+        orgState: organization.stateRegion,
+        orgIndustry: organization.industryType,
+        supervisorId: user.id,
+        supervisorName: user.name,
+        supervisorEmail: user.email,
+      })
+      .from(placement)
+      .innerJoin(organization, eq(placement.organizationId, organization.id))
+      .leftJoin(user, eq(placement.schoolSupervisorId, user.id))
+      .where(eq(placement.studentId, profile.id))
+      .orderBy(desc(placement.startDate))
+      .limit(1);
+
+    if (p) {
+      placementDetails = {
+        id: p.id,
+        status: p.status as "pending" | "active" | "completed",
+        placementSource: p.placementSource as "self_secured" | "department_assigned",
+        startDate: p.startDate,
+        endDate: p.endDate,
+        targetDays: p.targetDays,
+        organization: {
+          id: p.orgId,
+          name: p.orgName,
+          address: p.orgAddress,
+          stateRegion: p.orgState,
+          industryType: p.orgIndustry,
+        },
+        schoolSupervisor: p.supervisorId
+          ? {
+              id: p.supervisorId,
+              name: p.supervisorName,
+              email: p.supervisorEmail,
+            }
+          : null,
+      };
+    }
+  }
+
+  // Fetch list of registered organizations
+  const orgList = await db
+    .select()
+    .from(organization)
+    .orderBy(asc(organization.name));
+
+  const organizationsFormatted: OrganizationItem[] = orgList.map((org) => ({
+    id: org.id,
+    name: org.name,
+    address: org.address,
+    stateRegion: org.stateRegion,
+    industryType: org.industryType,
+  }));
+
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex items-center gap-2 text-xs text-on-surface-variant font-medium">
-        <Link href="/student" className="hover:text-primary transition-colors">
-          Dashboard
-        </Link>
-        <span>/</span>
-        <span className="text-on-surface">My Placement</span>
-      </div>
-
-      <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-8 text-center max-w-xl mx-auto my-8">
-        <div className="w-12 h-12 rounded-xl bg-surface-container-low text-primary flex items-center justify-center mx-auto mb-4">
-          <Building2 className="size-6" />
-        </div>
-        <h2 className="font-heading text-xl font-bold text-on-surface mb-2">
-          Placement & Organization Details
-        </h2>
-        <p className="text-xs text-on-surface-variant leading-relaxed mb-6">
-          Full placement history, organization directory, and supervisor assignment details will be configured in Phase 3 (Feature 10).
-        </p>
-        <Link
-          href="/student"
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-on-primary text-xs font-semibold hover:bg-primary-container transition-all"
-        >
-          <ArrowLeft className="size-3.5" />
-          <span>Back to Overview</span>
-        </Link>
-      </div>
-    </div>
+    <StudentPlacementView
+      placement={placementDetails}
+      organizations={organizationsFormatted}
+      studentName={session.user.name || "Student"}
+      matricNumber={profile?.matricNumber}
+    />
   );
 }

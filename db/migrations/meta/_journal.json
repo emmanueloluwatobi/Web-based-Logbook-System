@@ -15,6 +15,34 @@
       "when": 1788604127752,
       "tag": "0001_conscious_psynapse",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788893557013,
+      "tag": "0002_known_harpoon",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789105945510,
+      "tag": "0003_sad_lethal_legion",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1789108582549,
+      "tag": "0004_wide_sugar_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789407887556,
+      "tag": "0005_light_mad_thinker",
+      "breakpoints": true
     }
   ]
 }

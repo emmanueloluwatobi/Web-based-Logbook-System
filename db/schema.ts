@@ -10,7 +10,10 @@ import {
   integer,
   time,
   AnyPgColumn,
+  unique,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 // --- Academic Structure ---
 
@@ -37,20 +40,28 @@ export const academicSession = pgTable("academic_session", {
 
 // --- Better Auth Tables (Extended) ---
 
-export const user = pgTable("user", {
-  id: text("id").primaryKey(),
-  name: text("name").notNull(),
-  email: text("email").notNull().unique(),
-  emailVerified: boolean("email_verified").default(false).notNull(),
-  image: text("image"),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-  // Extended fields
-  role: text("role", {
-    enum: ["student", "school_supervisor", "hod", "admin", "industry_supervisor"],
-  }).notNull(),
-  departmentId: uuid("department_id").references(() => department.id, { onDelete: "set null" }),
-});
+export const user = pgTable(
+  "user",
+  {
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    email: text("email").notNull().unique(),
+    emailVerified: boolean("email_verified").default(false).notNull(),
+    image: text("image"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    // Extended fields
+    role: text("role", {
+      enum: ["student", "school_supervisor", "hod", "admin", "industry_supervisor"],
+    }).notNull(),
+    departmentId: uuid("department_id").references(() => department.id, { onDelete: "set null" }),
+  },
+  (table) => [
+    uniqueIndex("unique_active_hod_per_department")
+      .on(table.departmentId)
+      .where(sql`${table.role} = 'hod'`),
+  ]
+);
 
 export const session = pgTable("session", {
   id: text("id").primaryKey(),
@@ -128,9 +139,9 @@ export const placement = pgTable("placement", {
   organizationId: uuid("organization_id")
     .notNull()
     .references(() => organization.id, { onDelete: "restrict" }),
-  schoolSupervisorId: text("school_supervisor_id")
-    .notNull()
-    .references(() => user.id, { onDelete: "restrict" }),
+  schoolSupervisorId: text("school_supervisor_id").references(() => user.id, {
+    onDelete: "restrict",
+  }),
   industrySupervisorId: text("industry_supervisor_id").references(() => user.id, {
     onDelete: "set null",
   }),
@@ -145,6 +156,7 @@ export const placement = pgTable("placement", {
   })
     .default("pending")
     .notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
 // --- Logbook Entries & Supervision ---
@@ -190,20 +202,27 @@ export const supervisorFeedback = pgTable("supervisor_feedback", {
 
 // --- Attendance ---
 
-export const attendance = pgTable("attendance", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  studentId: uuid("student_id")
-    .notNull()
-    .references(() => studentProfile.id, { onDelete: "cascade" }),
-  placementId: uuid("placement_id")
-    .notNull()
-    .references(() => placement.id, { onDelete: "cascade" }),
-  date: date("date").notNull(),
-  checkIn: time("check_in").notNull(),
-  checkOut: time("check_out"),
-  hours: numeric("hours"), // derived, stored for query speed
-  status: text("status", { enum: ["present", "absent", "late"] }).notNull(),
-});
+export const attendance = pgTable(
+  "attendance",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    studentId: uuid("student_id")
+      .notNull()
+      .references(() => studentProfile.id, { onDelete: "cascade" }),
+    placementId: uuid("placement_id")
+      .notNull()
+      .references(() => placement.id, { onDelete: "cascade" }),
+    date: date("date").notNull(),
+    checkIn: time("check_in").notNull(),
+    checkOut: time("check_out"),
+    hours: numeric("hours"), // derived, stored for query speed
+    status: text("status", { enum: ["present", "absent", "late"] }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("unique_attendance_student_date").on(table.studentId, table.date),
+  ]
+);
 
 // --- Review Rubric Type ---
 
@@ -257,6 +276,7 @@ export const notificationLog = pgTable("notification_log", {
     .references(() => user.id, { onDelete: "cascade" }),
   type: text("type", {
     enum: [
+      "welcome_student",
       "entry_rejected",
       "entry_submitted",
       "overdue_summary",

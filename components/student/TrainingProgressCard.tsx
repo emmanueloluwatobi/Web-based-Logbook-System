@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Calendar, Clock, CheckCircle2, TrendingUp, Sparkles } from "lucide-react";
+import { CheckCircle2, TrendingUp } from "lucide-react";
 
 interface TrainingProgressCardProps {
   daysCompleted?: number;
