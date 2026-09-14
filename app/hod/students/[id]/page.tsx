@@ -117,6 +117,7 @@ export default async function HodStudentDetailPage({ params }: PageProps) {
       id: placement.id,
       organizationId: placement.organizationId,
       schoolSupervisorId: placement.schoolSupervisorId,
+      industrySupervisorId: placement.industrySupervisorId,
       startDate: placement.startDate,
       endDate: placement.endDate,
       targetDays: placement.targetDays,
@@ -162,7 +163,7 @@ export default async function HodStudentDetailPage({ params }: PageProps) {
       }
     }
 
-    // Fetch supervisor info
+    // Fetch school supervisor info
     let supervisorName: string | null = null;
     let supervisorEmail: string | null = null;
 
@@ -179,6 +180,23 @@ export default async function HodStudentDetailPage({ params }: PageProps) {
       }
     }
 
+    // Fetch industry supervisor info
+    let industrySupervisorName: string | null = null;
+    let industrySupervisorEmail: string | null = null;
+
+    if (activePlacement.industrySupervisorId) {
+      const [indSup] = await db
+        .select({ name: user.name, email: user.email })
+        .from(user)
+        .where(eq(user.id, activePlacement.industrySupervisorId))
+        .limit(1);
+
+      if (indSup) {
+        industrySupervisorName = indSup.name;
+        industrySupervisorEmail = indSup.email;
+      }
+    }
+
     placementData = {
       id: activePlacement.id,
       organizationId: activePlacement.organizationId || "",
@@ -189,6 +207,9 @@ export default async function HodStudentDetailPage({ params }: PageProps) {
       schoolSupervisorId: activePlacement.schoolSupervisorId,
       supervisorName,
       supervisorEmail,
+      industrySupervisorId: activePlacement.industrySupervisorId,
+      industrySupervisorName,
+      industrySupervisorEmail,
       startDate: activePlacement.startDate,
       endDate: activePlacement.endDate,
       targetDays: activePlacement.targetDays,

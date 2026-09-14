@@ -29,6 +29,7 @@ import {
   createDepartmentPlacement,
   updatePlacement,
 } from "@/actions/placement";
+import { assignIndustrySupervisor } from "@/actions/assessment";
 
 export interface StudentProfileData {
   id: string;
@@ -53,6 +54,9 @@ export interface StudentPlacementData {
   schoolSupervisorId: string | null;
   supervisorName: string | null;
   supervisorEmail: string | null;
+  industrySupervisorId?: string | null;
+  industrySupervisorName?: string | null;
+  industrySupervisorEmail?: string | null;
   startDate: string;
   endDate: string;
   targetDays: number;
@@ -95,6 +99,15 @@ export function HodStudentDetailView({
     placement?.schoolSupervisorId || (departmentSupervisors[0]?.id ?? "")
   );
   const [isAssigningSupervisor, startAssignSupervisor] = useTransition();
+
+  // Industry supervisor assignment state
+  const [industryName, setIndustryName] = useState(
+    placement?.industrySupervisorName || ""
+  );
+  const [industryEmail, setIndustryEmail] = useState(
+    placement?.industrySupervisorEmail || ""
+  );
+  const [isAssigningIndustry, startAssignIndustry] = useTransition();
 
   // Placement edit mode state
   const [isEditingPlacement, setIsEditingPlacement] = useState(false);
@@ -143,10 +156,39 @@ export function HodStudentDetailView({
           toast.error(res.error || "Failed to assign supervisor.");
           return;
         }
-        toast.success("School supervisor assigned successfully!");
+        toast.success("School Supervisor assigned successfully!");
         router.refresh();
       } catch (err) {
         console.error("Assign supervisor error:", err);
+        toast.error("An unexpected error occurred.");
+      }
+    });
+  };
+
+  const handleAssignIndustrySupervisor = () => {
+    if (!placement) return;
+    if (!industryName.trim() || !industryEmail.trim()) {
+      toast.error("Please provide both supervisor name and corporate email.");
+      return;
+    }
+
+    startAssignIndustry(async () => {
+      try {
+        const res = await assignIndustrySupervisor({
+          placementId: placement.id,
+          supervisorName: industryName.trim(),
+          supervisorEmail: industryEmail.trim(),
+        });
+
+        if (!res.success) {
+          toast.error(res.error || "Failed to assign industry supervisor.");
+          return;
+        }
+
+        toast.success("Industry supervisor assigned! Invitation email dispatched.");
+        router.refresh();
+      } catch (err) {
+        console.error("Assign industry supervisor error:", err);
         toast.error("An unexpected error occurred.");
       }
     });
@@ -364,105 +406,211 @@ export function HodStudentDetailView({
 
       {/* Grid: Supervisor Assignment + Placement Management */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: School Supervisor Assignment (1 Col) */}
-        <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 shadow-xs space-y-5 lg:col-span-1">
-          <div>
-            <h2 className="font-heading font-bold text-base text-on-surface flex items-center gap-2">
-              <UserCheck className="size-4.5 text-primary" />
-              <span>School Supervisor</span>
-            </h2>
-            <p className="text-xs text-on-surface-variant mt-1">
-              Assign an academic supervisor from {student.departmentName}
-            </p>
+        {/* Left Column: Supervisors (1 Col) */}
+        <div className="space-y-6 lg:col-span-1">
+          {/* School Supervisor Card */}
+          <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 shadow-xs space-y-5">
+            <div>
+              <h2 className="font-heading font-bold text-base text-on-surface flex items-center gap-2">
+                <UserCheck className="size-4.5 text-primary" />
+                <span>School Supervisor</span>
+              </h2>
+              <p className="text-xs text-on-surface-variant mt-1">
+                Assign an academic supervisor from {student.departmentName}
+              </p>
+            </div>
+
+            {/* Current Supervisor Card */}
+            <div className="p-3.5 rounded-xl border border-outline-variant bg-surface-container-low/40">
+              <span className="text-[10px] uppercase tracking-wider font-bold text-on-surface-variant">
+                Currently Assigned
+              </span>
+              {placement?.supervisorName ? (
+                <div className="mt-2 flex items-start gap-3">
+                  <div className="size-8 rounded-full bg-emerald-500/10 text-emerald-700 font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">
+                    <UserCheck className="size-4 text-emerald-600" />
+                  </div>
+                  <div>
+                    <div className="font-semibold text-sm text-on-surface">
+                      {placement.supervisorName}
+                    </div>
+                    <div className="text-xs text-on-surface-variant">
+                      {placement.supervisorEmail}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-2 flex items-center gap-2 text-amber-700 dark:text-amber-300 text-xs font-medium">
+                  <UserX className="size-4 shrink-0" />
+                  <span>No supervisor assigned yet</span>
+                </div>
+              )}
+            </div>
+
+            {/* Assignment Form */}
+            {placement ? (
+              <div className="space-y-3 pt-2">
+                <label
+                  htmlFor="supervisor-select"
+                  className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant"
+                >
+                  {placement.schoolSupervisorId ? "Reassign Supervisor" : "Select Supervisor"}
+                </label>
+
+                {departmentSupervisors.length === 0 ? (
+                  <div className="p-3 rounded-lg bg-amber-500/10 text-amber-800 dark:text-amber-200 text-xs">
+                    No School Supervisors have been created in this department. Please contact the administrator.
+                  </div>
+                ) : (
+                  <select
+                    id="supervisor-select"
+                    value={selectedSupervisorId}
+                    onChange={(e) => setSelectedSupervisorId(e.target.value)}
+                    className="w-full text-sm rounded-lg border border-outline-variant bg-surface-container-lowest text-on-surface px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    {departmentSupervisors.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} ({s.email})
+                      </option>
+                    ))}
+                  </select>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleAssignSupervisor}
+                  disabled={isAssigningSupervisor || departmentSupervisors.length === 0}
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary text-on-primary text-sm font-semibold hover:bg-primary/90 transition-colors shadow-xs disabled:opacity-50"
+                >
+                  {isAssigningSupervisor ? (
+                    <>
+                      <Loader2 className="size-4 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="size-4" />
+                      <span>
+                        {placement.schoolSupervisorId
+                          ? "Update Supervisor"
+                          : "Assign to Student"}
+                      </span>
+                    </>
+                  )}
+                </button>
+              </div>
+            ) : null}
           </div>
 
-          {/* Current Supervisor Card */}
-          <div className="p-3.5 rounded-xl border border-outline-variant bg-surface-container-low/40">
-            <span className="text-[10px] uppercase tracking-wider font-bold text-on-surface-variant">
-              Currently Assigned
-            </span>
-            {placement?.supervisorName ? (
-              <div className="mt-2 flex items-start gap-3">
-                <div className="size-8 rounded-full bg-emerald-500/10 text-emerald-700 font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">
-                  <UserCheck className="size-4 text-emerald-600" />
+          {/* Industry Supervisor Card */}
+          <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 shadow-xs space-y-5">
+            <div>
+              <h2 className="font-heading font-bold text-base text-on-surface flex items-center gap-2">
+                <Building2 className="size-4.5 text-primary" />
+                <span>Industry Supervisor</span>
+              </h2>
+              <p className="text-xs text-on-surface-variant mt-1">
+                Workplace mentor at {placement?.organizationName || "host organization"}
+              </p>
+            </div>
+
+            {/* Current Industry Supervisor Card */}
+            <div className="p-3.5 rounded-xl border border-outline-variant bg-surface-container-low/40">
+              <span className="text-[10px] uppercase tracking-wider font-bold text-on-surface-variant">
+                Workplace Mentor
+              </span>
+              {placement?.industrySupervisorName ? (
+                <div className="mt-2 flex items-start gap-3">
+                  <div className="size-8 rounded-full bg-blue-500/10 text-blue-700 font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">
+                    <Building2 className="size-4 text-primary" />
+                  </div>
+                  <div>
+                    <div className="font-semibold text-sm text-on-surface">
+                      {placement.industrySupervisorName}
+                    </div>
+                    <div className="text-xs text-on-surface-variant">
+                      {placement.industrySupervisorEmail}
+                    </div>
+                  </div>
                 </div>
+              ) : (
+                <div className="mt-2 flex items-center gap-2 text-amber-700 dark:text-amber-300 text-xs font-medium">
+                  <UserX className="size-4 shrink-0" />
+                  <span>No workplace supervisor assigned yet</span>
+                </div>
+              )}
+            </div>
+
+            {/* Industry Supervisor Assignment Form */}
+            {placement ? (
+              <div className="space-y-3 pt-1">
                 <div>
-                  <div className="font-semibold text-sm text-on-surface">
-                    {placement.supervisorName}
-                  </div>
-                  <div className="text-xs text-on-surface-variant">
-                    {placement.supervisorEmail}
-                  </div>
+                  <label
+                    htmlFor="ind-sup-name"
+                    className="block text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant mb-1"
+                  >
+                    Supervisor Name
+                  </label>
+                  <input
+                    id="ind-sup-name"
+                    type="text"
+                    value={industryName}
+                    onChange={(e) => setIndustryName(e.target.value)}
+                    placeholder="e.g. Engr. O. Adebayo"
+                    className="w-full text-xs rounded-lg border border-outline-variant bg-surface-container-lowest text-on-surface px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
                 </div>
+
+                <div>
+                  <label
+                    htmlFor="ind-sup-email"
+                    className="block text-[11px] font-semibold uppercase tracking-wider text-on-surface-variant mb-1"
+                  >
+                    Corporate Email
+                  </label>
+                  <input
+                    id="ind-sup-email"
+                    type="email"
+                    value={industryEmail}
+                    onChange={(e) => setIndustryEmail(e.target.value)}
+                    placeholder="supervisor@company.com"
+                    className="w-full text-xs rounded-lg border border-outline-variant bg-surface-container-lowest text-on-surface px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  <p className="text-[10px] text-on-surface-variant/70 mt-1">
+                    An email invitation with passwordless login instructions will be sent automatically.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleAssignIndustrySupervisor}
+                  disabled={isAssigningIndustry || !industryName || !industryEmail}
+                  className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary text-on-primary text-xs font-semibold hover:bg-primary/90 transition-colors shadow-xs disabled:opacity-50"
+                >
+                  {isAssigningIndustry ? (
+                    <>
+                      <Loader2 className="size-3.5 animate-spin" />
+                      <span>Sending Invite...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Mail className="size-3.5" />
+                      <span>
+                        {placement.industrySupervisorId
+                          ? "Update & Re-send Invite"
+                          : "Assign & Send Invite"}
+                      </span>
+                    </>
+                  )}
+                </button>
               </div>
             ) : (
-              <div className="mt-2 flex items-center gap-2 text-amber-700 dark:text-amber-300 text-xs font-medium">
-                <UserX className="size-4 shrink-0" />
-                <span>No supervisor assigned yet</span>
+              <div className="p-4 rounded-xl bg-surface-container-low text-xs text-on-surface-variant space-y-1">
+                <p className="font-medium text-on-surface">Placement required</p>
+                <p>Register the student&apos;s placement first before assigning workplace supervisors.</p>
               </div>
             )}
           </div>
-
-          {/* Assignment Form */}
-          {placement ? (
-            <div className="space-y-3 pt-2">
-              <label
-                htmlFor="supervisor-select"
-                className="block text-xs font-semibold uppercase tracking-wider text-on-surface-variant"
-              >
-                {placement.schoolSupervisorId ? "Reassign Supervisor" : "Select Supervisor"}
-              </label>
-
-              {departmentSupervisors.length === 0 ? (
-                <div className="p-3 rounded-lg bg-amber-500/10 text-amber-800 dark:text-amber-200 text-xs">
-                  No School Supervisors have been created in this department. Please contact the administrator.
-                </div>
-              ) : (
-                <select
-                  id="supervisor-select"
-                  value={selectedSupervisorId}
-                  onChange={(e) => setSelectedSupervisorId(e.target.value)}
-                  className="w-full text-sm rounded-lg border border-outline-variant bg-surface-container-lowest text-on-surface px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary"
-                >
-                  {departmentSupervisors.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} ({s.email})
-                    </option>
-                  ))}
-                </select>
-              )}
-
-              <button
-                type="button"
-                onClick={handleAssignSupervisor}
-                disabled={isAssigningSupervisor || departmentSupervisors.length === 0}
-                className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary text-on-primary text-sm font-semibold hover:bg-primary/90 transition-colors shadow-xs disabled:opacity-50"
-              >
-                {isAssigningSupervisor ? (
-                  <>
-                    <Loader2 className="size-4 animate-spin" />
-                    <span>Saving...</span>
-                  </>
-                ) : (
-                  <>
-                    <Save className="size-4" />
-                    <span>
-                      {placement.schoolSupervisorId
-                        ? "Update Supervisor"
-                        : "Assign to Student"}
-                    </span>
-                  </>
-                )}
-              </button>
-            </div>
-          ) : (
-            <div className="p-4 rounded-xl bg-surface-container-low text-xs text-on-surface-variant space-y-2">
-              <p className="font-medium text-on-surface">Placement required</p>
-              <p>
-                Supervisors can only be assigned to a registered placement. Use the form on the right to set up the student&apos;s placement first.
-              </p>
-            </div>
-          )}
         </div>
 
         {/* Right Column: Placement Management (2 Cols) */}

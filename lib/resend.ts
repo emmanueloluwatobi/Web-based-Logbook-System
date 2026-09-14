@@ -556,3 +556,90 @@ export async function sendNotificationEmail(
 ): Promise<void> {
   await sendEmail({ to, subject, text: message });
 }
+
+/**
+ * 8. Verification OTP Email (Industry Supervisor)
+ */
+export async function sendOTPEmail(email: string, otp: string): Promise<void> {
+  const subject = `Your ULS SIWES Login Code: ${otp}`;
+  const text = `Your login verification code for the Ekiti State University SIWES Industry Portal is: ${otp}\n\nThis code will expire in 15 minutes. If you did not request this code, you can safely ignore this email.\n\nEkiti State University SIWES Directorate`;
+
+  const contentHtml = `
+    <p>Hello,</p>
+    <p>Here is your single-use verification code to sign in to the <strong>Industry Supervisor Portal</strong> on the Ekiti State University SIWES system:</p>
+    <div style="background-color: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 8px; padding: 20px; text-align: center; margin: 24px 0;">
+      <span style="font-family: monospace, Courier, sans-serif; font-size: 32px; font-weight: 700; letter-spacing: 6px; color: #003fb1;">
+        ${otp}
+      </span>
+    </div>
+    <p style="font-size: 13px; color: #64748b; text-align: center;">
+      Enter this 6-digit code on the login screen to complete your sign-in. This code is valid for <strong>15 minutes</strong>.
+    </p>
+  `;
+
+  const html = buildBrandedHtml({
+    preheader: `Your 6-digit login verification code: ${otp}`,
+    title: "Your Login Verification Code",
+    subtitle: "Industry Supervisor Access",
+    badgeText: "Security Verification",
+    badgeColor: "#003fb1",
+    contentHtml,
+    ctaText: "Go to Industry Portal",
+    ctaUrl: `${baseUrl}/login/industry`,
+  });
+
+  await sendEmail({ to: email, subject, text, html });
+}
+
+/**
+ * 9. Industry Supervisor Placement Invite Email
+ */
+export async function sendIndustryInviteEmail({
+  to,
+  supervisorName,
+  studentName,
+  organizationName,
+  loginUrl,
+}: {
+  to: string;
+  supervisorName: string;
+  studentName: string;
+  organizationName: string;
+  loginUrl?: string;
+}): Promise<void> {
+  const targetUrl = loginUrl || `${baseUrl}/login/industry`;
+  const subject = `SIWES Student Placement & Supervision — ${studentName}`;
+  const text = `Hello ${supervisorName},\n\n${studentName} has registered for their Students Industrial Work Experience Scheme (SIWES) placement at ${organizationName} and assigned you as their workplace Industry Supervisor.\n\nAs their supervisor, you can access the ULS Industry Partner Portal without a password using your email address to periodically review their work and complete their monthly evaluations.\n\nAccess the portal: ${targetUrl}\n\nEkiti State University SIWES Directorate`;
+
+  const contentHtml = `
+    <p>Hello <strong>${supervisorName}</strong>,</p>
+    <p><strong>${studentName}</strong> has been registered for an approved <strong>Students Industrial Work Experience Scheme (SIWES)</strong> placement at <strong>${organizationName}</strong> under your supervision.</p>
+    
+    <div style="background-color: #eef4ff; border-left: 4px solid #003fb1; padding: 14px 18px; border-radius: 4px; margin: 20px 0;">
+      <h3 style="margin: 0 0 8px 0; font-size: 14px; color: #003fb1;">Your Role as Industry Supervisor:</h3>
+      <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: #1e293b; line-height: 1.6;">
+        <li>Guide and mentor the student during their internship activities.</li>
+        <li>Review the student's monthly logbook summary and cumulative hours worked.</li>
+        <li>Submit a monthly performance score across 7 key evaluation areas (technical skills, punctuality, problem solving, teamwork, etc.).</li>
+      </ul>
+    </div>
+
+    <p style="font-size: 13px; color: #475569;">
+      <strong>Passwordless Access:</strong> You never need to remember a password. Whenever you access the system, you can request an instant 6-digit verification code or single-click sign-in link sent directly to this email.
+    </p>
+  `;
+
+  const html = buildBrandedHtml({
+    preheader: `${studentName} is placed at ${organizationName} under your supervision.`,
+    title: "Student Placement Notice",
+    subtitle: "Ekiti State University · SIWES Directorate",
+    badgeText: "Industry Partner",
+    badgeColor: "#003fb1",
+    contentHtml,
+    ctaText: "Access Industry Portal",
+    ctaUrl: targetUrl,
+  });
+
+  await sendEmail({ to, subject, text, html });
+}
+

@@ -1,12 +1,17 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
-import { magicLink } from "better-auth/plugins";
+import { magicLink, emailOTP } from "better-auth/plugins";
 import { eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import * as schema from "@/db/schema";
 import { studentProfile, department } from "@/db/schema";
-import { sendMagicLinkEmail, sendStudentWelcomeEmail, logNotification } from "@/lib/resend";
+import {
+  sendMagicLinkEmail,
+  sendOTPEmail,
+  sendStudentWelcomeEmail,
+  logNotification,
+} from "@/lib/resend";
 
 export const auth = betterAuth({
   database: drizzleAdapter(db, { provider: "pg", schema }),
@@ -18,6 +23,11 @@ export const auth = betterAuth({
     magicLink({
       sendMagicLink: async ({ email, url }) => {
         await sendMagicLinkEmail(email, url);
+      },
+    }),
+    emailOTP({
+      sendVerificationOTP: async ({ email, otp }) => {
+        await sendOTPEmail(email, otp);
       },
     }),
   ],
