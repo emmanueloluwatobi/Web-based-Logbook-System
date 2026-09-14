@@ -38,6 +38,14 @@ async function isAuthorized(req: NextRequest): Promise<boolean> {
   return false;
 }
 
+function getCronSecretFromRequest(req: NextRequest): string | undefined {
+  const authHeader = req.headers.get("authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    return authHeader.slice(7).trim();
+  }
+  return req.headers.get("x-cron-secret") || undefined;
+}
+
 /**
  * Route handler to trigger overdue logbook submission checks.
  * Protected by CRON_SECRET or Admin/HOD session.
@@ -55,7 +63,8 @@ export async function GET(req: NextRequest) {
     }
 
     const force = req.nextUrl.searchParams.get("force") === "true";
-    const result = await triggerOverdueNotificationCheck({ force });
+    const cronSecret = getCronSecretFromRequest(req);
+    const result = await triggerOverdueNotificationCheck({ force, cronSecret });
 
     if (!result.success) {
       return NextResponse.json(
@@ -95,7 +104,8 @@ export async function POST(req: NextRequest) {
       // Body parsing is optional
     }
 
-    const result = await triggerOverdueNotificationCheck({ force });
+    const cronSecret = getCronSecretFromRequest(req);
+    const result = await triggerOverdueNotificationCheck({ force, cronSecret });
 
     if (!result.success) {
       return NextResponse.json(

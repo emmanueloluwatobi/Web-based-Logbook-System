@@ -236,6 +236,20 @@ export interface EntryMutationResult {
   };
 }
 
+function validateHoursWorked(raw: unknown): { valid: true; hours: number } | { valid: false; error: string } {
+  if (raw === null || raw === undefined || String(raw).trim() === "") {
+    return { valid: false, error: "Hours worked is required." };
+  }
+  const num = Number(raw);
+  if (isNaN(num) || !isFinite(num)) {
+    return { valid: false, error: "Hours worked must be a valid number." };
+  }
+  if (num < 0.5 || num > 24) {
+    return { valid: false, error: "Hours worked must be between 0.5 and 24.0 hours." };
+  }
+  return { valid: true, hours: num };
+}
+
 /**
  * Create a new logbook entry (as draft or submitted for review).
  */
@@ -265,7 +279,11 @@ export async function createEntry(formData: FormData): Promise<EntryMutationResu
       };
     }
 
-    const hoursWorked = Math.max(0.5, Math.min(24, parseFloat(String(hoursWorkedRaw)) || 8.0));
+    const hoursValidation = validateHoursWorked(hoursWorkedRaw);
+    if (!hoursValidation.valid) {
+      return { success: false, error: hoursValidation.error };
+    }
+    const hoursWorked = hoursValidation.hours;
 
     // Ensure placement exists
     const activePlacement = await ensureStudentPlacement(profile.id);
@@ -407,9 +425,16 @@ export async function updateEntry(formData: FormData): Promise<EntryMutationResu
         : existing.challenges;
     const attachmentFile = formData.get("attachment") as File | null;
 
-    const hoursWorked = hoursWorkedRaw
-      ? Math.max(0.5, Math.min(24, parseFloat(String(hoursWorkedRaw)) || 8.0))
-      : parseFloat(existing.hoursWorked);
+    let hoursWorked: number;
+    if (hoursWorkedRaw !== null && hoursWorkedRaw !== undefined && String(hoursWorkedRaw).trim() !== "") {
+      const hoursValidation = validateHoursWorked(hoursWorkedRaw);
+      if (!hoursValidation.valid) {
+        return { success: false, error: hoursValidation.error };
+      }
+      hoursWorked = hoursValidation.hours;
+    } else {
+      hoursWorked = parseFloat(existing.hoursWorked);
+    }
 
     let attachmentUrl = existing.attachmentUrl;
 
@@ -645,9 +670,16 @@ export async function resubmitEntry(
         ? (challengesRaw as string).trim() || null
         : original.challenges;
 
-    const hoursWorked = hoursWorkedRaw
-      ? Math.max(0.5, Math.min(24, parseFloat(String(hoursWorkedRaw)) || 8.0))
-      : parseFloat(original.hoursWorked);
+    let hoursWorked: number;
+    if (hoursWorkedRaw !== null && hoursWorkedRaw !== undefined && String(hoursWorkedRaw).trim() !== "") {
+      const hoursValidation = validateHoursWorked(hoursWorkedRaw);
+      if (!hoursValidation.valid) {
+        return { success: false, error: hoursValidation.error };
+      }
+      hoursWorked = hoursValidation.hours;
+    } else {
+      hoursWorked = parseFloat(original.hoursWorked);
+    }
 
     const newEntryId = crypto.randomUUID();
     let attachmentUrl = original.attachmentUrl;
@@ -726,17 +758,43 @@ export async function resubmitEntry(
  */
 export async function getEntryVersionChain(entryId: string): Promise<VersionChainItem[]> {
   try {
-    // 1. Fetch current entry
+    // 1. Fetch current entry with student profile, student user, and placement for authorization
     const [current] = await db
-      .select()
+      .select({
+        entry: logbookEntry,
+        studentUserId: studentProfile.userId,
+        studentDepartmentId: user.departmentId,
+        placementSupervisorId: placement.schoolSupervisorId,
+      })
       .from(logbookEntry)
+      .innerJoin(studentProfile, eq(logbookEntry.studentId, studentProfile.id))
+      .innerJoin(user, eq(studentProfile.userId, user.id))
+      .leftJoin(placement, eq(logbookEntry.placementId, placement.id))
       .where(eq(logbookEntry.id, entryId))
       .limit(1);
 
     if (!current) return [];
 
+    // Authenticate and authorize caller
+    const session = await auth.api.getSession({
+      headers: await headers(),
+    });
+
+    if (!session?.user) return [];
+
+    const caller = session.user;
+    const isAuthorized =
+      caller.role === "admin" ||
+      (caller.role === "student" && current.studentUserId === caller.id) ||
+      (caller.role === "school_supervisor" && current.placementSupervisorId === caller.id) ||
+      (caller.role === "hod" && Boolean(caller.departmentId) && current.studentDepartmentId === caller.departmentId);
+
+    if (!isAuthorized) {
+      return [];
+    }
+
     // 2. Walk up parentEntryId to find the root entry
-    let root = current;
+    let root = current.entry;
     while (root.parentEntryId) {
       const [parent] = await db
         .select()
@@ -813,22 +871,22 @@ export async function getEntryVersionChain(entryId: string): Promise<VersionChai
     // If for some reason childMap didn't link everything, fallback to sorting all matching on root.id or parent chains
     if (chain.length === 0) {
       chain.push({
-        id: current.id,
-        versionNumber: current.versionNumber,
-        entryDate: current.entryDate,
-        status: current.status as
+        id: current.entry.id,
+        versionNumber: current.entry.versionNumber,
+        entryDate: current.entry.entryDate,
+        status: current.entry.status as
           | "draft"
           | "submitted"
           | "approved"
           | "rejected"
           | "needs_correction",
-        hoursWorked: parseFloat(current.hoursWorked) || 8.0,
-        activityDescription: current.activityDescription,
-        skillsGained: current.skillsGained,
-        challenges: current.challenges,
-        attachmentUrl: current.attachmentUrl,
-        submittedAt: current.submittedAt ? current.submittedAt.toISOString() : null,
-        parentEntryId: current.parentEntryId,
+        hoursWorked: parseFloat(current.entry.hoursWorked) || 8.0,
+        activityDescription: current.entry.activityDescription,
+        skillsGained: current.entry.skillsGained,
+        challenges: current.entry.challenges,
+        attachmentUrl: current.entry.attachmentUrl,
+        submittedAt: current.entry.submittedAt ? current.entry.submittedAt.toISOString() : null,
+        parentEntryId: current.entry.parentEntryId,
         feedback: null,
       });
     }

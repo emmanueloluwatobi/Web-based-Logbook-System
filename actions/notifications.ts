@@ -1,6 +1,7 @@
 "use server";
 
 import { eq, and, inArray, desc, gte } from "drizzle-orm";
+import { headers } from "next/headers";
 import { db } from "@/lib/db";
 import {
   placement,
@@ -10,6 +11,7 @@ import {
   logbookEntry,
   notificationLog,
 } from "@/db/schema";
+import { auth } from "@/lib/auth";
 import { sendOverdueSummaryEmail, logNotification } from "@/lib/resend";
 
 export interface OverdueCheckResult {
@@ -23,22 +25,64 @@ export interface OverdueCheckResult {
   };
 }
 
+export interface OverdueCheckOptions {
+  force?: boolean;
+  cronSecret?: string;
+}
+
 /**
- * Feature 15: Scans all active placements for students who have not submitted
+ * Feature 15: Scans active placements for students who have not submitted
  * any logbook entries in the last 7+ calendar days, groups them by department,
  * and emails an inactivity digest to the departmental HOD.
  *
- * Includes 24-hour idempotency/rate-limiting per department to prevent spamming
- * unless force: true is explicitly provided.
+ * Security:
+ * - Requires either an internal verified cron secret, or an authenticated Admin/HOD session.
+ * - HOD callers are strictly scoped to their own department.
+ * - The force bypass is restricted to Admin callers and verified cron runners.
  */
-export async function triggerOverdueNotificationCheck(options?: {
-  force?: boolean;
-}): Promise<OverdueCheckResult> {
+export async function triggerOverdueNotificationCheck(
+  options?: OverdueCheckOptions
+): Promise<OverdueCheckResult> {
   try {
+    // 1. Authorize caller
+    let isAuthorized = false;
+    let callerRole: string | null = null;
+    let callerDepartmentId: string | null = null;
+
+    const validCronSecret = process.env.CRON_SECRET;
+    if (
+      options?.cronSecret &&
+      validCronSecret &&
+      options.cronSecret === validCronSecret
+    ) {
+      isAuthorized = true;
+      callerRole = "cron";
+    } else {
+      const session = await auth.api.getSession({
+        headers: await headers(),
+      });
+
+      if (session?.user && (session.user.role === "admin" || session.user.role === "hod")) {
+        isAuthorized = true;
+        callerRole = session.user.role;
+        callerDepartmentId = session.user.departmentId || null;
+      }
+    }
+
+    if (!isAuthorized) {
+      return {
+        success: false,
+        error: "Unauthorized: You do not have permission to trigger overdue notification scans.",
+      };
+    }
+
+    // Force bypass is strictly reserved for admins or verified cron runners
+    const allowForce = (callerRole === "admin" || callerRole === "cron") && Boolean(options?.force);
+
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // 1. Fetch all active placements with student user details
+    // 2. Fetch active placements with student user details
     const activePlacements = await db
       .select({
         placementId: placement.id,
@@ -55,7 +99,13 @@ export async function triggerOverdueNotificationCheck(options?: {
       .innerJoin(user, eq(studentProfile.userId, user.id))
       .where(eq(placement.status, "active"));
 
-    if (!activePlacements || activePlacements.length === 0) {
+    // Filter to caller's department if caller is HOD
+    const targetPlacements =
+      callerRole === "hod" && callerDepartmentId
+        ? activePlacements.filter((p) => p.departmentId === callerDepartmentId)
+        : activePlacements;
+
+    if (!targetPlacements || targetPlacements.length === 0) {
       return {
         success: true,
         data: {
@@ -98,7 +148,7 @@ export async function triggerOverdueNotificationCheck(options?: {
 
     const departmentOverdueMap = new Map<string, OverdueStudentItem[]>();
 
-    for (const p of activePlacements) {
+    for (const p of targetPlacements) {
       if (!p.departmentId) continue;
 
       // Find student's most recent submitted, approved, or needs_correction entry
@@ -160,7 +210,7 @@ export async function triggerOverdueNotificationCheck(options?: {
 
       if (hodUser) {
         // Idempotency check: Has an overdue_summary already been sent to this HOD in the last 24 hours?
-        if (!options?.force) {
+        if (!allowForce) {
           const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
           const [recentNotification] = await db
             .select({ id: notificationLog.id })

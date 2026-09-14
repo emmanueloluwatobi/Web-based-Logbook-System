@@ -75,6 +75,42 @@ async function verifyHodDepartmentScope(
 }
 
 /**
+ * Verifies that the designated supervisor exists, has the 'school_supervisor' role,
+ * and if the caller is an HOD, belongs to the same department as the HOD.
+ * Admin users bypass the departmental restriction.
+ */
+async function verifySupervisorEligibility(
+  session: { user: { id: string; role: string; departmentId?: string | null } },
+  supervisorUserId: string
+): Promise<{ error: string | null }> {
+  if (!supervisorUserId) {
+    return { error: "School Supervisor ID is required." };
+  }
+
+  const [supervisor] = await db
+    .select({ id: user.id, role: user.role, departmentId: user.departmentId })
+    .from(user)
+    .where(eq(user.id, supervisorUserId))
+    .limit(1);
+
+  if (!supervisor) {
+    return { error: "Selected user was not found." };
+  }
+
+  if (supervisor.role !== "school_supervisor") {
+    return { error: "Selected user is not a registered School Supervisor." };
+  }
+
+  if (session.user.role === "hod" && session.user.departmentId) {
+    if (supervisor.departmentId !== session.user.departmentId) {
+      return { error: "You can only assign supervisors from your own department." };
+    }
+  }
+
+  return { error: null };
+}
+
+/**
  * Ensures session belongs to a student and returns their profile.
  */
 async function assertStudent() {
@@ -428,15 +464,9 @@ export async function approveStudentPlacement(formData: FormData): Promise<Place
       return { success: false, error: "You must assign an academic School Supervisor to approve this placement." };
     }
 
-    // Verify supervisor user exists and is a supervisor
-    const [supervisor] = await db
-      .select({ id: user.id })
-      .from(user)
-      .where(and(eq(user.id, schoolSupervisorId), eq(user.role, "school_supervisor")))
-      .limit(1);
-
-    if (!supervisor) {
-      return { success: false, error: "Selected supervisor is not a valid School Supervisor." };
+    const { error: supervisorError } = await verifySupervisorEligibility(session, schoolSupervisorId);
+    if (supervisorError) {
+      return { success: false, error: supervisorError };
     }
 
     // HOD department-scoping: verify student is in same department
@@ -515,6 +545,11 @@ export async function createDepartmentPlacement(formData: FormData): Promise<Pla
 
     if (!schoolSupervisorId) {
       return { success: false, error: "School Supervisor assignment is required." };
+    }
+
+    const { error: supervisorError } = await verifySupervisorEligibility(session, schoolSupervisorId);
+    if (supervisorError) {
+      return { success: false, error: supervisorError };
     }
 
     if (!startDate || !endDate) {
@@ -663,7 +698,13 @@ export async function updatePlacement(formData: FormData): Promise<PlacementMuta
 
     const updatePayload: Record<string, unknown> = {};
     if (organizationId) updatePayload.organizationId = organizationId;
-    if (schoolSupervisorId) updatePayload.schoolSupervisorId = schoolSupervisorId;
+    if (schoolSupervisorId) {
+      const { error: supervisorError } = await verifySupervisorEligibility(session, schoolSupervisorId);
+      if (supervisorError) {
+        return { success: false, error: supervisorError };
+      }
+      updatePayload.schoolSupervisorId = schoolSupervisorId;
+    }
     if (startDate) updatePayload.startDate = startDate;
     if (endDate) updatePayload.endDate = endDate;
     if (targetDaysRaw) {
@@ -750,22 +791,9 @@ export async function assignSupervisor(
     const { error: scopeError } = await verifyHodDepartmentScope(session, studentProfileId);
     if (scopeError) return { success: false, error: scopeError };
 
-    // Verify supervisor exists and is a school_supervisor
-    const [supervisor] = await db
-      .select({ id: user.id, departmentId: user.departmentId })
-      .from(user)
-      .where(and(eq(user.id, supervisorId), eq(user.role, "school_supervisor")))
-      .limit(1);
-
-    if (!supervisor) {
-      return { success: false, error: "Selected user is not a valid School Supervisor." };
-    }
-
-    // For HOD, also verify supervisor is in the same department
-    if (session.user.role === "hod" && session.user.departmentId) {
-      if (supervisor.departmentId !== session.user.departmentId) {
-        return { success: false, error: "You can only assign supervisors from your own department." };
-      }
+    const { error: supervisorError } = await verifySupervisorEligibility(session, supervisorId);
+    if (supervisorError) {
+      return { success: false, error: supervisorError };
     }
 
     // Find the student's active or pending placement

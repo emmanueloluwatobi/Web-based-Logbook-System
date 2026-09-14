@@ -46,6 +46,8 @@ async function assertStudent() {
   return { error: null, profile, session };
 }
 
+const TIME_REGEX = /^([01]\d|2[0-3]):([0-5]\d)$/;
+
 /**
  * Logs or updates an attendance record for a student on their active placement.
  */
@@ -60,12 +62,20 @@ export async function logAttendance(formData: FormData): Promise<AttendanceMutat
     const checkOut = (formData.get("checkOut") as string)?.trim() || null;
     const status = (formData.get("status") as "present" | "late" | "absent") || "present";
 
-    if (!date) {
-      return { success: false, error: "Please select an attendance date." };
+    if (!date || isNaN(new Date(date).getTime())) {
+      return { success: false, error: "Please provide a valid attendance date." };
     }
 
     if (!checkIn) {
       return { success: false, error: "Check-in time is required." };
+    }
+
+    if (!TIME_REGEX.test(checkIn)) {
+      return { success: false, error: "Invalid check-in time format. Expected 24-hour HH:mm format." };
+    }
+
+    if (checkOut && !TIME_REGEX.test(checkOut)) {
+      return { success: false, error: "Invalid check-out time format. Expected 24-hour HH:mm format." };
     }
 
     if (!["present", "late", "absent"].includes(status)) {
@@ -97,10 +107,6 @@ export async function logAttendance(formData: FormData): Promise<AttendanceMutat
       const [inH, inM] = checkIn.split(":").map(Number);
       const [outH, outM] = checkOut.split(":").map(Number);
 
-      if (isNaN(inH) || isNaN(inM) || isNaN(outH) || isNaN(outM)) {
-        return { success: false, error: "Invalid check-in or check-out time format." };
-      }
-
       const inTotal = inH * 60 + inM;
       const outTotal = outH * 60 + outM;
 
@@ -129,22 +135,40 @@ export async function logAttendance(formData: FormData): Promise<AttendanceMutat
         return { success: false, error: "Attendance record not found." };
       }
 
-      const [updated] = await db
-        .update(attendance)
-        .set({
-          date,
-          checkIn,
-          checkOut,
-          hours,
-          status,
-        })
-        .where(eq(attendance.id, recordId))
-        .returning();
+      try {
+        const [updated] = await db
+          .update(attendance)
+          .set({
+            date,
+            checkIn,
+            checkOut,
+            hours,
+            status,
+            placementId: activePlacement.id,
+          })
+          .where(eq(attendance.id, recordId))
+          .returning();
 
-      revalidatePath("/student/attendance");
-      revalidatePath("/student");
+        revalidatePath("/student/attendance");
+        revalidatePath("/student");
 
-      return { success: true, data: updated };
+        return { success: true, data: updated };
+      } catch (updateError: unknown) {
+        if (
+          updateError &&
+          typeof updateError === "object" &&
+          (("code" in updateError && updateError.code === "23505") ||
+            ("message" in updateError &&
+              typeof updateError.message === "string" &&
+              updateError.message.includes("unique_attendance_student_date")))
+        ) {
+          return {
+            success: false,
+            error: "An attendance record already exists for this date.",
+          };
+        }
+        throw updateError;
+      }
     }
 
     // Atomic Upsert: insert new attendance record or update existing on date conflict
@@ -174,7 +198,20 @@ export async function logAttendance(formData: FormData): Promise<AttendanceMutat
     revalidatePath("/student");
 
     return { success: true, data: saved };
-  } catch (error) {
+  } catch (error: unknown) {
+    if (
+      error &&
+      typeof error === "object" &&
+      (("code" in error && error.code === "23505") ||
+        ("message" in error &&
+          typeof error.message === "string" &&
+          error.message.includes("unique_attendance_student_date")))
+    ) {
+      return {
+        success: false,
+        error: "An attendance record already exists for this date.",
+      };
+    }
     console.error("[actions/attendance.logAttendance]", error);
     return { success: false, error: "Failed to log attendance." };
   }
