@@ -96,6 +96,19 @@ function buildBrandedHtml({
 }
 
 /**
+ * Escapes HTML entities to prevent HTML injection in email templates.
+ */
+export function escapeHtml(str: string | null | undefined): string {
+  if (!str) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
  * Unified email sender with priority:
  * 1. Gmail SMTP (via nodemailer) if GMAIL_USER + GMAIL_APP_PASSWORD exist
  * 2. Resend SDK if RESEND_API_KEY exists
@@ -204,14 +217,16 @@ export async function sendStudentWelcomeEmail({
   name: string;
   departmentName?: string | null;
 }): Promise<void> {
-  const subject = "Welcome to the ULS SIWES Logbook System";
-  const deptText = departmentName ? ` (${departmentName})` : "";
+  const safeName = escapeHtml(name);
+  const safeDept = escapeHtml(departmentName);
+  const deptText = safeDept ? ` (${safeDept})` : "";
   const portalUrl = `${baseUrl}/student`;
+  const subject = "Welcome to EKSU SIWES Portal — Next Steps for Your Attachment";
 
-  const text = `Hello ${name},\n\nWelcome to the Ekiti State University SIWES Logbook System (ULS Portal)${deptText}.\n\nYour student account has been successfully registered. To get started with your industrial attachment:\n\n1. Complete your Student Profile (matric number, level, program, phone)\n2. Submit your Training Organization & Placement details for approval\n3. Begin logging your daily activities and attendance once your placement is confirmed\n\nAccess your dashboard: ${portalUrl}\n\nEkiti State University SIWES Directorate`;
+  const text = `Hello ${name},\n\nWelcome to the Ekiti State University SIWES Logbook System (ULS Portal)${departmentName ? ` (${departmentName})` : ""}.\n\nYour student account has been successfully registered. To get started with your industrial attachment:\n\n1. Complete your Student Profile (matric number, level, program, phone)\n2. Submit your Training Organization & Placement details for approval\n3. Begin logging your daily activities and attendance once your placement is confirmed\n\nAccess your dashboard: ${portalUrl}\n\nEkiti State University SIWES Directorate`;
 
   const contentHtml = `
-    <p>Hello <strong>${name}</strong>,</p>
+    <p>Hello <strong>${safeName}</strong>,</p>
     <p>Welcome to the <strong>Ekiti State University SIWES Logbook System (ULS Portal)</strong>${deptText}. Your student account has been successfully created.</p>
     
     <div style="background-color: #eef4ff; border-left: 4px solid #003fb1; padding: 14px 18px; border-radius: 4px; margin: 20px 0;">
@@ -227,7 +242,7 @@ export async function sendStudentWelcomeEmail({
   `;
 
   const html = buildBrandedHtml({
-    preheader: `Welcome to EKSU SIWES Portal, ${name}! Here are your next onboarding steps.`,
+    preheader: `Welcome to EKSU SIWES Portal, ${safeName}! Here are your next onboarding steps.`,
     title: "Welcome to ULS Portal",
     subtitle: "Ekiti State University · SIWES Directorate",
     badgeText: "Student Onboarding",
@@ -256,12 +271,14 @@ export async function sendAccountInviteEmail(
   };
 
   const roleName = roleDisplayNames[role] || role;
+  const safeName = escapeHtml(name);
+  const safeRole = escapeHtml(roleName);
   const subject = `Invitation to Join ULS Portal as ${roleName}`;
   const text = `Hello ${name},\n\nYou have been invited to join the Ekiti State University SIWES Logbook System (ULS Portal) as a ${roleName}.\n\nPlease click the link below to set your password and access your dashboard:\n\n${inviteUrl}\n\nThis invitation link expires in 48 hours.\n\nEkiti State University SIWES Directorate`;
 
   const contentHtml = `
-    <p>Hello <strong>${name}</strong>,</p>
-    <p>You have been formally designated as a <strong>${roleName}</strong> on the <strong>Ekiti State University SIWES Logbook System (ULS Portal)</strong>.</p>
+    <p>Hello <strong>${safeName}</strong>,</p>
+    <p>You have been formally designated as a <strong>${safeRole}</strong> on the <strong>Ekiti State University SIWES Logbook System (ULS Portal)</strong>.</p>
     <p>To activate your institutional access and configure your account password, click the button below:</p>
     <div style="background-color: #f8fafc; border: 1px dashed #cbd5e1; padding: 12px 16px; border-radius: 6px; margin: 16px 0; font-size: 12px; color: #64748b;">
       <strong>Note:</strong> For security reasons, this setup link will expire in <strong>48 hours</strong>.
@@ -269,9 +286,9 @@ export async function sendAccountInviteEmail(
   `;
 
   const html = buildBrandedHtml({
-    preheader: `You've been invited as a ${roleName} on the ULS SIWES Portal.`,
+    preheader: `You've been invited as a ${safeRole} on the ULS SIWES Portal.`,
     title: `Faculty Portal Access`,
-    subtitle: `Role Assignment: ${roleName}`,
+    subtitle: `Role Assignment: ${safeRole}`,
     badgeText: "Account Activation",
     badgeColor: "#003fb1",
     contentHtml,
@@ -299,18 +316,21 @@ export async function sendEntryRejectedEmail({
   comment: string;
   entryUrl?: string;
 }): Promise<void> {
+  const safeStudent = escapeHtml(studentName);
+  const safeDate = escapeHtml(entryDate);
+  const safeComment = escapeHtml(comment);
   const subject = `Correction Requested on Logbook Entry (${entryDate})`;
   const targetUrl = entryUrl || `${baseUrl}/student/logbook`;
 
   const text = `Hello ${studentName},\n\nYour School Supervisor has reviewed your logbook entry for ${entryDate} and requested corrections.\n\nSupervisor's Feedback:\n"${comment}"\n\nPlease review your supervisor's remarks and submit a corrected revision through your logbook:\n${targetUrl}\n\nEkiti State University SIWES Directorate`;
 
   const contentHtml = `
-    <p>Hello <strong>${studentName}</strong>,</p>
-    <p>Your School Supervisor has reviewed your logbook entry for <strong>${entryDate}</strong> and requested corrections before approval.</p>
+    <p>Hello <strong>${safeStudent}</strong>,</p>
+    <p>Your School Supervisor has reviewed your logbook entry for <strong>${safeDate}</strong> and requested corrections before approval.</p>
 
     <div style="background-color: #fff8f1; border-left: 4px solid #d97706; padding: 16px; border-radius: 4px; margin: 20px 0;">
       <p style="margin: 0 0 6px 0; font-size: 12px; font-weight: 700; text-transform: uppercase; color: #b45309; letter-spacing: 0.5px;">Supervisor's Remarks:</p>
-      <blockquote style="margin: 0; font-style: italic; color: #451a03; font-size: 14px;">"${comment}"</blockquote>
+      <blockquote style="margin: 0; font-style: italic; color: #451a03; font-size: 14px;">"${safeComment}"</blockquote>
     </div>
 
     <p style="font-size: 13px; color: #475569;">
@@ -319,9 +339,9 @@ export async function sendEntryRejectedEmail({
   `;
 
   const html = buildBrandedHtml({
-    preheader: `Action Required: Correction requested on your ${entryDate} SIWES entry.`,
+    preheader: `Action Required: Correction requested on your ${safeDate} SIWES entry.`,
     title: "Correction Required",
-    subtitle: `Entry Date: ${entryDate}`,
+    subtitle: `Entry Date: ${safeDate}`,
     badgeText: "Logbook Feedback",
     badgeColor: "#d97706",
     contentHtml,
@@ -349,21 +369,24 @@ export async function sendEntrySubmittedEmail({
   entryDate: string;
   reviewUrl?: string;
 }): Promise<void> {
+  const safeSupervisor = escapeHtml(supervisorName);
+  const safeStudent = escapeHtml(studentName);
+  const safeDate = escapeHtml(entryDate);
   const subject = `New Entry Awaiting Review — ${studentName} (${entryDate})`;
   const targetUrl = reviewUrl || `${baseUrl}/supervisor`;
 
   const text = `Hello ${supervisorName},\n\nYour assigned student, ${studentName}, has submitted a new logbook entry for ${entryDate}.\n\nPlease review and evaluate this entry on your supervisor dashboard:\n${targetUrl}\n\nEkiti State University SIWES Directorate`;
 
   const contentHtml = `
-    <p>Hello <strong>${supervisorName}</strong>,</p>
-    <p>Your assigned student <strong>${studentName}</strong> has submitted a daily logbook entry for <strong>${entryDate}</strong> awaiting your review.</p>
+    <p>Hello <strong>${safeSupervisor}</strong>,</p>
+    <p>Your assigned student <strong>${safeStudent}</strong> has submitted a daily logbook entry for <strong>${safeDate}</strong> awaiting your review.</p>
     <p style="font-size: 13px; color: #475569;">You can inspect their recorded activities, challenges, and hours worked, then approve or request corrections directly from your review queue.</p>
   `;
 
   const html = buildBrandedHtml({
-    preheader: `${studentName} submitted a logbook entry for ${entryDate}.`,
+    preheader: `${safeStudent} submitted a logbook entry for ${safeDate}.`,
     title: "New Entry Submitted",
-    subtitle: `Student: ${studentName}`,
+    subtitle: `Student: ${safeStudent}`,
     badgeText: "Review Queue",
     badgeColor: "#003fb1",
     contentHtml,
@@ -393,6 +416,11 @@ export async function sendPlacementApprovedEmail({
   startDate: string;
   endDate: string;
 }): Promise<void> {
+  const safeStudent = escapeHtml(studentName);
+  const safeOrg = escapeHtml(organizationName);
+  const safeSupervisor = escapeHtml(supervisorName);
+  const safeStart = escapeHtml(startDate);
+  const safeEnd = escapeHtml(endDate);
   const subject = `SIWES Placement Approved — ${organizationName}`;
   const targetUrl = `${baseUrl}/student/placement`;
 
@@ -400,7 +428,7 @@ export async function sendPlacementApprovedEmail({
   const text = `Hello ${studentName},\n\nCongratulations! Your SIWES industrial training placement has been approved.\n\nOrganization: ${organizationName}\nTraining Period: ${startDate} to ${endDate}\n${supervisorText}\nYou may now begin recording your daily logbook entries and logging attendance.\n\nView details: ${targetUrl}\n\nEkiti State University SIWES Directorate`;
 
   const contentHtml = `
-    <p>Hello <strong>${studentName}</strong>,</p>
+    <p>Hello <strong>${safeStudent}</strong>,</p>
     <p>Your SIWES placement registration has been officially reviewed and <strong>approved</strong> by your department.</p>
 
     <div style="background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 18px; margin: 20px 0;">
@@ -408,16 +436,16 @@ export async function sendPlacementApprovedEmail({
       <table style="width: 100%; font-size: 13px; color: #1e293b; border-collapse: collapse;">
         <tr>
           <td style="padding: 4px 0; color: #64748b;">Organization:</td>
-          <td style="padding: 4px 0; font-weight: 600;">${organizationName}</td>
+          <td style="padding: 4px 0; font-weight: 600;">${safeOrg}</td>
         </tr>
         <tr>
           <td style="padding: 4px 0; color: #64748b;">Duration:</td>
-          <td style="padding: 4px 0; font-weight: 600;">${startDate} &mdash; ${endDate}</td>
+          <td style="padding: 4px 0; font-weight: 600;">${safeStart} &mdash; ${safeEnd}</td>
         </tr>
-        ${supervisorName ? `
+        ${safeSupervisor ? `
         <tr>
           <td style="padding: 4px 0; color: #64748b;">School Supervisor:</td>
-          <td style="padding: 4px 0; font-weight: 600;">${supervisorName}</td>
+          <td style="padding: 4px 0; font-weight: 600;">${safeSupervisor}</td>
         </tr>
         ` : ""}
       </table>
@@ -427,9 +455,9 @@ export async function sendPlacementApprovedEmail({
   `;
 
   const html = buildBrandedHtml({
-    preheader: `Your SIWES placement at ${organizationName} is approved!`,
+    preheader: `Your SIWES placement at ${safeOrg} is approved!`,
     title: "Placement Approved",
-    subtitle: organizationName,
+    subtitle: safeOrg,
     badgeText: "Official Confirmation",
     badgeColor: "#16a34a",
     contentHtml,
@@ -460,6 +488,8 @@ export async function sendOverdueSummaryEmail({
     supervisorName?: string | null;
   }>;
 }): Promise<void> {
+  const safeHod = escapeHtml(hodName);
+  const safeDept = escapeHtml(departmentName);
   const subject = `SIWES Inactivity Digest: ${overdueStudents.length} Overdue Students (${departmentName})`;
   const targetUrl = `${baseUrl}/hod`;
 
@@ -476,17 +506,17 @@ export async function sendOverdueSummaryEmail({
     .map(
       (s) => `
       <tr style="border-bottom: 1px solid #e2e8f0;">
-        <td style="padding: 10px 8px; font-weight: 600; color: #0f172a;">${s.name}</td>
-        <td style="padding: 10px 8px; color: #475569;">${s.matricNumber || "&mdash;"}</td>
+        <td style="padding: 10px 8px; font-weight: 600; color: #0f172a;">${escapeHtml(s.name)}</td>
+        <td style="padding: 10px 8px; color: #475569;">${s.matricNumber ? escapeHtml(s.matricNumber) : "&mdash;"}</td>
         <td style="padding: 10px 8px; color: #dc2626; font-weight: 600;">${s.daysSinceLastEntry} days</td>
-        <td style="padding: 10px 8px; color: #475569;">${s.supervisorName || "<span style='color:#94a3b8;'>Unassigned</span>"}</td>
+        <td style="padding: 10px 8px; color: #475569;">${s.supervisorName ? escapeHtml(s.supervisorName) : "<span style='color:#94a3b8;'>Unassigned</span>"}</td>
       </tr>
     `,
     )
     .join("");
 
   const contentHtml = `
-    <p>Hello <strong>${hodName}</strong>,</p>
+    <p>Hello <strong>${safeHod}</strong>,</p>
     <p>This is your department's automated weekly SIWES submission monitoring digest. There are currently <strong>${overdueStudents.length} student(s)</strong> with active placements who have not logged any activities in the past 7 or more calendar days.</p>
 
     <div style="overflow-x: auto; margin: 20px 0;">
@@ -509,9 +539,9 @@ export async function sendOverdueSummaryEmail({
   `;
 
   const html = buildBrandedHtml({
-    preheader: `Weekly SIWES alert: ${overdueStudents.length} students overdue in ${departmentName}.`,
+    preheader: `Weekly SIWES alert: ${overdueStudents.length} students overdue in ${safeDept}.`,
     title: "Submission Inactivity Alert",
-    subtitle: `Department of ${departmentName}`,
+    subtitle: `Department of ${safeDept}`,
     badgeText: "Compliance Alert",
     badgeColor: "#dc2626",
     contentHtml,
@@ -556,3 +586,93 @@ export async function sendNotificationEmail(
 ): Promise<void> {
   await sendEmail({ to, subject, text: message });
 }
+
+/**
+ * 8. Verification OTP Email (Industry Supervisor)
+ */
+export async function sendOTPEmail(email: string, otp: string): Promise<void> {
+  const subject = `Your ULS SIWES Login Code: ${otp}`;
+  const text = `Your login verification code for the Ekiti State University SIWES Industry Portal is: ${otp}\n\nThis code will expire in 15 minutes. If you did not request this code, you can safely ignore this email.\n\nEkiti State University SIWES Directorate`;
+
+  const contentHtml = `
+    <p>Hello,</p>
+    <p>Here is your single-use verification code to sign in to the <strong>Industry Supervisor Portal</strong> on the Ekiti State University SIWES system:</p>
+    <div style="background-color: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 8px; padding: 20px; text-align: center; margin: 24px 0;">
+      <span style="font-family: monospace, Courier, sans-serif; font-size: 32px; font-weight: 700; letter-spacing: 6px; color: #003fb1;">
+        ${otp}
+      </span>
+    </div>
+    <p style="font-size: 13px; color: #64748b; text-align: center;">
+      Enter this 6-digit code on the login screen to complete your sign-in. This code is valid for <strong>15 minutes</strong>.
+    </p>
+  `;
+
+  const html = buildBrandedHtml({
+    preheader: `Your 6-digit login verification code: ${otp}`,
+    title: "Your Login Verification Code",
+    subtitle: "Industry Supervisor Access",
+    badgeText: "Security Verification",
+    badgeColor: "#003fb1",
+    contentHtml,
+    ctaText: "Go to Industry Portal",
+    ctaUrl: `${baseUrl}/login/industry`,
+  });
+
+  await sendEmail({ to: email, subject, text, html });
+}
+
+/**
+ * 9. Industry Supervisor Placement Invite Email
+ */
+export async function sendIndustryInviteEmail({
+  to,
+  supervisorName,
+  studentName,
+  organizationName,
+  loginUrl,
+}: {
+  to: string;
+  supervisorName: string;
+  studentName: string;
+  organizationName: string;
+  loginUrl?: string;
+}): Promise<void> {
+  const safeSupervisor = escapeHtml(supervisorName);
+  const safeStudent = escapeHtml(studentName);
+  const safeOrg = escapeHtml(organizationName);
+  const targetUrl = loginUrl || `${baseUrl}/login/industry`;
+  const subject = `SIWES Student Placement & Supervision — ${studentName}`;
+  const text = `Hello ${supervisorName},\n\n${studentName} has registered for their Students Industrial Work Experience Scheme (SIWES) placement at ${organizationName} and assigned you as their workplace Industry Supervisor.\n\nAs their supervisor, you can access the ULS Industry Partner Portal without a password using your email address to periodically review their work and complete their monthly evaluations.\n\nAccess the portal: ${targetUrl}\n\nEkiti State University SIWES Directorate`;
+
+  const contentHtml = `
+    <p>Hello <strong>${safeSupervisor}</strong>,</p>
+    <p><strong>${safeStudent}</strong> has been registered for an approved <strong>Students Industrial Work Experience Scheme (SIWES)</strong> placement at <strong>${safeOrg}</strong> under your supervision.</p>
+    
+    <div style="background-color: #eef4ff; border-left: 4px solid #003fb1; padding: 14px 18px; border-radius: 4px; margin: 20px 0;">
+      <h3 style="margin: 0 0 8px 0; font-size: 14px; color: #003fb1;">Your Role as Industry Supervisor:</h3>
+      <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: #1e293b; line-height: 1.6;">
+        <li>Guide and mentor the student during their internship activities.</li>
+        <li>Review the student's monthly logbook summary and cumulative hours worked.</li>
+        <li>Submit a monthly performance score across 7 key evaluation areas (technical skills, punctuality, problem solving, teamwork, etc.).</li>
+      </ul>
+    </div>
+
+    <p style="font-size: 13px; color: #475569;">
+      <strong>Passwordless Access:</strong> You never need to remember a password. Whenever you access the system, you can request an instant 6-digit verification code or single-click sign-in link sent directly to this email.
+    </p>
+  `;
+
+  const html = buildBrandedHtml({
+    preheader: `${safeStudent} is placed at ${safeOrg} under your supervision.`,
+    title: "Student Placement Notice",
+    subtitle: "Ekiti State University · SIWES Directorate",
+    badgeText: "Industry Partner",
+    badgeColor: "#003fb1",
+    contentHtml,
+    ctaText: "Access Industry Portal",
+    ctaUrl: targetUrl,
+  });
+
+  await sendEmail({ to, subject, text, html });
+}
+

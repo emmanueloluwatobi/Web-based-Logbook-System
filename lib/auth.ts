@@ -1,12 +1,53 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
-import { magicLink } from "better-auth/plugins";
-import { eq } from "drizzle-orm";
+import { magicLink, emailOTP } from "better-auth/plugins";
+import { eq, and } from "drizzle-orm";
 import { db } from "@/lib/db";
 import * as schema from "@/db/schema";
 import { studentProfile, department } from "@/db/schema";
-import { sendMagicLinkEmail, sendStudentWelcomeEmail, logNotification } from "@/lib/resend";
+import {
+  sendMagicLinkEmail,
+  sendOTPEmail,
+  sendStudentWelcomeEmail,
+  logNotification,
+} from "@/lib/resend";
+
+/**
+ * Checks whether an email belongs to an assigned Industry Supervisor with at least
+ * one currently active student placement (placement.status = 'active').
+ * Prevents dispatching login OTP/links to arbitrary emails, students, staff, or unassigned mentors.
+ */
+async function isEligibleIndustrySupervisor(email: string): Promise<boolean> {
+  try {
+    const cleanEmail = email.trim().toLowerCase();
+    const [foundUser] = await db
+      .select({ id: schema.user.id, role: schema.user.role })
+      .from(schema.user)
+      .where(eq(schema.user.email, cleanEmail))
+      .limit(1);
+
+    if (!foundUser || foundUser.role !== "industry_supervisor") {
+      return false;
+    }
+
+    const [activePlacement] = await db
+      .select({ id: schema.placement.id })
+      .from(schema.placement)
+      .where(
+        and(
+          eq(schema.placement.industrySupervisorId, foundUser.id),
+          eq(schema.placement.status, "active")
+        )
+      )
+      .limit(1);
+
+    return !!activePlacement;
+  } catch (error) {
+    console.error("[lib/auth] Error checking industry supervisor eligibility:", error);
+    return false;
+  }
+}
 
 export const auth = betterAuth({
   database: drizzleAdapter(db, { provider: "pg", schema }),
@@ -16,8 +57,25 @@ export const auth = betterAuth({
   plugins: [
     nextCookies(),
     magicLink({
+      disableSignUp: true,
       sendMagicLink: async ({ email, url }) => {
+        const eligible = await isEligibleIndustrySupervisor(email);
+        if (!eligible) {
+          console.warn(`[lib/auth.magicLink] Suppressed magic link dispatch to ineligible address: ${email}`);
+          return;
+        }
         await sendMagicLinkEmail(email, url);
+      },
+    }),
+    emailOTP({
+      disableSignUp: true,
+      sendVerificationOTP: async ({ email, otp }) => {
+        const eligible = await isEligibleIndustrySupervisor(email);
+        if (!eligible) {
+          console.warn(`[lib/auth.emailOTP] Suppressed OTP dispatch to ineligible address: ${email}`);
+          return;
+        }
+        await sendOTPEmail(email, otp);
       },
     }),
   ],

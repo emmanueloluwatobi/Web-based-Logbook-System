@@ -238,21 +238,30 @@ export type RubricScores = {
 
 // --- Monthly Industry Review & Final Assessment ---
 
-export const monthlyIndustryReview = pgTable("monthly_industry_review", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  placementId: uuid("placement_id")
-    .notNull()
-    .references(() => placement.id, { onDelete: "cascade" }),
-  industrySupervisorId: text("industry_supervisor_id")
-    .notNull()
-    .references(() => user.id, { onDelete: "restrict" }),
-  reviewMonth: text("review_month").notNull(), // e.g. "2026-03"
-  scores: jsonb("scores").$type<RubricScores>().notNull(),
-  comment: text("comment").notNull(),
-  attestationName: text("attestation_name").notNull(),
-  attestationOfficeId: text("attestation_office_id").notNull(),
-  reviewedAt: timestamp("reviewed_at", { withTimezone: true }).defaultNow().notNull(),
-});
+export const monthlyIndustryReview = pgTable(
+  "monthly_industry_review",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    placementId: uuid("placement_id")
+      .notNull()
+      .references(() => placement.id, { onDelete: "cascade" }),
+    industrySupervisorId: text("industry_supervisor_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "restrict" }),
+    reviewMonth: text("review_month").notNull(), // e.g. "2026-03"
+    scores: jsonb("scores").$type<RubricScores>().notNull(),
+    comment: text("comment").notNull(),
+    attestationName: text("attestation_name").notNull(),
+    attestationOfficeId: text("attestation_office_id").notNull(),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    unique("unique_monthly_industry_review_placement_month").on(
+      table.placementId,
+      table.reviewMonth
+    ),
+  ]
+);
 
 export const assessment = pgTable("assessment", {
   id: uuid("id").primaryKey().defaultRandom(),
