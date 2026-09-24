@@ -43,10 +43,11 @@ export default async function StudentPlacementPage() {
   let placementDetails: PlacementDetails | null = null;
 
   if (profile) {
-    const [p] = await db
+    const placements = await db
       .select({
         id: placement.id,
         status: placement.status,
+        rejectionReason: placement.rejectionReason,
         placementSource: placement.placementSource,
         startDate: placement.startDate,
         endDate: placement.endDate,
@@ -59,18 +60,24 @@ export default async function StudentPlacementPage() {
         supervisorId: user.id,
         supervisorName: user.name,
         supervisorEmail: user.email,
+        createdAt: placement.createdAt,
       })
       .from(placement)
       .innerJoin(organization, eq(placement.organizationId, organization.id))
       .leftJoin(user, eq(placement.schoolSupervisorId, user.id))
       .where(eq(placement.studentId, profile.id))
-      .orderBy(desc(placement.startDate))
-      .limit(1);
+      .orderBy(desc(placement.createdAt));
+
+    const priority = { active: 4, pending: 3, rejected: 2, completed: 1 };
+    const p = placements.sort(
+      (a, b) => (priority[b.status as keyof typeof priority] || 0) - (priority[a.status as keyof typeof priority] || 0)
+    )[0] || null;
 
     if (p) {
       placementDetails = {
         id: p.id,
-        status: p.status as "pending" | "active" | "completed",
+        status: p.status as "pending" | "active" | "completed" | "rejected",
+        rejectionReason: p.rejectionReason,
         placementSource: p.placementSource as "self_secured" | "department_assigned",
         startDate: p.startDate,
         endDate: p.endDate,

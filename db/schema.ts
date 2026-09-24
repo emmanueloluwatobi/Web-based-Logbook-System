@@ -152,10 +152,11 @@ export const placement = pgTable("placement", {
     enum: ["self_secured", "department_assigned"],
   }).notNull(),
   status: text("status", {
-    enum: ["pending", "active", "completed"],
+    enum: ["pending", "active", "completed", "rejected"],
   })
     .default("pending")
     .notNull(),
+  rejectionReason: text("rejection_reason"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -290,6 +291,7 @@ export const notificationLog = pgTable("notification_log", {
       "entry_submitted",
       "overdue_summary",
       "placement_approved",
+      "placement_rejected",
       "industry_invite",
       "account_invite",
     ],

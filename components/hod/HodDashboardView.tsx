@@ -37,7 +37,7 @@ export function HodDashboardView({
           <div className="flex items-center gap-2 mb-1">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-primary-fixed text-on-primary-fixed text-[11px] font-semibold tracking-wide font-heading uppercase">
               <GraduationCap className="size-3.5" />
-              Department Head
+              Head of Department (H.O.D)
             </span>
             <span className="text-xs text-on-surface-variant">•</span>
             <span className="text-xs font-medium text-on-surface-variant">

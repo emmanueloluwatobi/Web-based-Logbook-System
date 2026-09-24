@@ -2,7 +2,7 @@ import React from "react";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import { eq, inArray } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import {
@@ -62,22 +62,47 @@ export default async function HodStudentsPage() {
     if (dept?.name) departmentName = dept.name;
   }
 
-  // 1. Fetch all students in this department
-  const studentRows = departmentId
+  // 1. Fetch all students in this department (from user with leftJoin to ensure no registered student is missed)
+  const rawStudentUsers = departmentId
     ? await db
         .select({
-          profileId: studentProfile.id,
           userId: user.id,
           studentName: user.name,
           email: user.email,
+          profileId: studentProfile.id,
           matricNumber: studentProfile.matricNumber,
           programId: studentProfile.programId,
           level: studentProfile.level,
         })
-        .from(studentProfile)
-        .innerJoin(user, eq(studentProfile.userId, user.id))
-        .where(eq(user.departmentId, departmentId))
+        .from(user)
+        .leftJoin(studentProfile, eq(user.id, studentProfile.userId))
+        .where(and(eq(user.role, "student"), eq(user.departmentId, departmentId)))
     : [];
+
+  const studentRows: {
+    profileId: string;
+    userId: string;
+    studentName: string;
+    email: string;
+    matricNumber: string | null;
+    programId: string | null;
+    level: string | null;
+  }[] = [];
+
+  for (const s of rawStudentUsers) {
+    if (!s.profileId) {
+      const [created] = await db
+        .insert(studentProfile)
+        .values({
+          userId: s.userId,
+          isProfileComplete: false,
+        })
+        .returning({ id: studentProfile.id });
+      studentRows.push({ ...s, profileId: created.id });
+    } else {
+      studentRows.push({ ...s, profileId: s.profileId });
+    }
+  }
 
   const studentProfileIds = studentRows.map((s) => s.profileId);
 
@@ -144,8 +169,8 @@ export default async function HodStudentsPage() {
     if (!existing) {
       studentPlacementMap.set(p.studentId, p);
     } else {
-      // Prioritize active > pending > completed
-      const priority = { active: 3, pending: 2, completed: 1 };
+      // Prioritize active > pending > completed > rejected
+      const priority = { active: 4, pending: 3, completed: 2, rejected: 1 };
       const existingScore = priority[existing.status as keyof typeof priority] || 0;
       const currentScore = priority[p.status as keyof typeof priority] || 0;
       if (currentScore > existingScore) {

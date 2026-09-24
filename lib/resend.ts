@@ -185,6 +185,7 @@ export async function logNotification({
     | "entry_submitted"
     | "overdue_summary"
     | "placement_approved"
+    | "placement_rejected"
     | "industry_invite"
     | "account_invite";
   message: string;

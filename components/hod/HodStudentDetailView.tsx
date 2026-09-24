@@ -22,12 +22,15 @@ import {
   Loader2,
   Save,
   X,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
   assignSupervisor,
   createDepartmentPlacement,
   updatePlacement,
+  approveStudentPlacement,
+  declineStudentPlacement,
 } from "@/actions/placement";
 import { assignIndustrySupervisor } from "@/actions/assessment";
 
@@ -60,7 +63,8 @@ export interface StudentPlacementData {
   startDate: string;
   endDate: string;
   targetDays: number;
-  status: "pending" | "active" | "completed";
+  status: "pending" | "active" | "completed" | "rejected";
+  rejectionReason?: string | null;
   placementSource: string;
   createdAt: string;
 }
@@ -135,12 +139,89 @@ export function HodStudentDetailView({
   const [editStartDate, setEditStartDate] = useState(placement?.startDate || "");
   const [editEndDate, setEditEndDate] = useState(placement?.endDate || "");
   const [editTargetDays, setEditTargetDays] = useState(placement?.targetDays || 60);
-  const [editStatus, setEditStatus] = useState<"pending" | "active" | "completed">(
+  const [editStatus, setEditStatus] = useState<"pending" | "active" | "completed" | "rejected">(
     placement?.status || "active"
   );
   const [editSupervisorId, setEditSupervisorId] = useState(
     placement?.schoolSupervisorId || ""
   );
+
+  // Approval & Decline state for pending placements
+  const [isApprovingPlacement, startApprovePlacement] = useTransition();
+  const [isDecliningPlacement, startDeclinePlacement] = useTransition();
+  const [approvalSupervisorId, setApprovalSupervisorId] = useState(
+    placement?.schoolSupervisorId || (departmentSupervisors[0]?.id ?? "")
+  );
+  const [approvalStartDate, setApprovalStartDate] = useState(placement?.startDate || "");
+  const [approvalEndDate, setApprovalEndDate] = useState(placement?.endDate || "");
+  const [approvalTargetDays, setApprovalTargetDays] = useState(placement?.targetDays || 60);
+  const [showDeclineForm, setShowDeclineForm] = useState(false);
+  const [declineReason, setDeclineReason] = useState("");
+
+  // Handler: Approve Student Placement
+  const handleApprovePlacement = () => {
+    if (!placement) return;
+    if (!approvalSupervisorId) {
+      toast.error("Please allocate a School Supervisor to approve this placement.");
+      return;
+    }
+    if (!approvalStartDate || !approvalEndDate) {
+      toast.error("Start and end dates are required.");
+      return;
+    }
+    if (new Date(approvalEndDate) <= new Date(approvalStartDate)) {
+      toast.error("End date must be after start date.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("placementId", placement.id);
+    formData.append("schoolSupervisorId", approvalSupervisorId);
+    formData.append("startDate", approvalStartDate);
+    formData.append("endDate", approvalEndDate);
+    formData.append("targetDays", String(approvalTargetDays));
+
+    startApprovePlacement(async () => {
+      try {
+        const res = await approveStudentPlacement(formData);
+        if (!res.success) {
+          toast.error(res.error || "Failed to approve placement.");
+          return;
+        }
+        toast.success("Placement accepted and School Supervisor allocated!");
+        router.refresh();
+      } catch (err) {
+        console.error("Approve placement error:", err);
+        toast.error("An unexpected error occurred.");
+      }
+    });
+  };
+
+  // Handler: Decline Student Placement
+  const handleDeclinePlacement = () => {
+    if (!placement) return;
+
+    const formData = new FormData();
+    formData.append("placementId", placement.id);
+    formData.append("reason", declineReason.trim());
+
+    startDeclinePlacement(async () => {
+      try {
+        const res = await declineStudentPlacement(formData);
+        if (!res.success) {
+          toast.error(res.error || "Failed to decline placement.");
+          return;
+        }
+        toast.success("Placement request has been declined.");
+        setShowDeclineForm(false);
+        setDeclineReason("");
+        router.refresh();
+      } catch (err) {
+        console.error("Decline placement error:", err);
+        toast.error("An unexpected error occurred.");
+      }
+    });
+  };
 
   // Handler: Assign Supervisor
   const handleAssignSupervisor = () => {
@@ -332,6 +413,11 @@ export function HodStudentDetailView({
                     <CheckCircle2 className="size-3" />
                     <span>Completed</span>
                   </span>
+                ) : placement?.status === "rejected" ? (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-error-container text-on-error-container text-xs font-medium">
+                    <XCircle className="size-3" />
+                    <span>Placement Declined</span>
+                  </span>
                 ) : (
                   <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-error-container text-on-error-container text-xs font-medium">
                     <AlertCircle className="size-3" />
@@ -403,6 +489,220 @@ export function HodStudentDetailView({
           </div>
         </div>
       </div>
+
+      {/* Pending Placement Review & Approval Card */}
+      {placement && placement.status === "pending" && (
+        <div className="bg-surface-container-lowest border-2 border-warning/40 rounded-2xl p-6 shadow-sm space-y-6 animate-in fade-in duration-200">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-outline-variant/60">
+            <div className="flex items-start gap-3.5">
+              <div className="size-10 rounded-xl bg-warning/15 text-warning flex items-center justify-center shrink-0 mt-0.5">
+                <Clock className="size-5 animate-pulse" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="font-heading font-bold text-lg text-on-surface">
+                    Pending Placement Approval
+                  </h2>
+                  <span className="px-2.5 py-0.5 rounded-full bg-warning/15 text-warning text-xs font-semibold">
+                    Action Required
+                  </span>
+                </div>
+                <p className="text-xs text-on-surface-variant mt-1">
+                  The student has self-secured a SIWES placement at{" "}
+                  <strong className="text-on-surface">{placement.organizationName}</strong>. Review company details, allocate an academic supervisor, and accept or decline.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Submitted Company Summary */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 rounded-xl bg-surface-container-low/50 border border-outline-variant/60">
+            <div>
+              <span className="text-[10px] uppercase font-bold text-on-surface-variant font-heading">
+                Company & Industry
+              </span>
+              <p className="text-sm font-semibold text-on-surface mt-0.5">{placement.organizationName}</p>
+              <p className="text-xs text-on-surface-variant">{placement.organizationIndustryType}</p>
+            </div>
+            <div>
+              <span className="text-[10px] uppercase font-bold text-on-surface-variant font-heading">
+                Location / Address
+              </span>
+              <p className="text-xs text-on-surface mt-0.5 font-medium leading-relaxed">
+                {placement.organizationAddress}, {placement.organizationStateRegion}
+              </p>
+            </div>
+            <div>
+              <span className="text-[10px] uppercase font-bold text-on-surface-variant font-heading">
+                Proposed Attachment Dates
+              </span>
+              <p className="text-xs text-on-surface mt-0.5 font-semibold">
+                {new Date(placement.startDate).toLocaleDateString()} – {new Date(placement.endDate).toLocaleDateString()}
+              </p>
+              <p className="text-[11px] text-on-surface-variant">{placement.targetDays} Target Days</p>
+            </div>
+          </div>
+
+          {/* Action Form */}
+          <div className="space-y-4 pt-2">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-on-surface-variant font-heading">
+              Allocate Academic School Supervisor & Confirm Dates
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-on-surface mb-1">
+                  School Supervisor *
+                </label>
+                <select
+                  value={approvalSupervisorId}
+                  onChange={(e) => setApprovalSupervisorId(e.target.value)}
+                  className="w-full text-xs rounded-lg border border-outline-variant bg-surface-container-lowest text-on-surface px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-primary font-medium"
+                >
+                  <option value="">— Select School Supervisor —</option>
+                  {departmentSupervisors.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.email})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-on-surface mb-1">
+                  Start Date
+                </label>
+                <input
+                  type="date"
+                  value={approvalStartDate}
+                  onChange={(e) => setApprovalStartDate(e.target.value)}
+                  className="w-full text-xs rounded-lg border border-outline-variant bg-surface-container-lowest text-on-surface px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-on-surface mb-1">
+                  End Date
+                </label>
+                <input
+                  type="date"
+                  value={approvalEndDate}
+                  onChange={(e) => setApprovalEndDate(e.target.value)}
+                  className="w-full text-xs rounded-lg border border-outline-variant bg-surface-container-lowest text-on-surface px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+            </div>
+
+            {/* Accept & Decline Buttons */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 pt-2">
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleApprovePlacement}
+                  disabled={isApprovingPlacement || isDecliningPlacement || !approvalSupervisorId}
+                  className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-primary text-on-primary text-xs font-bold hover:bg-primary/90 transition-all shadow-xs disabled:opacity-50"
+                >
+                  {isApprovingPlacement ? (
+                    <>
+                      <Loader2 className="size-4 animate-spin" />
+                      <span>Approving Placement...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="size-4" />
+                      <span>Accept & Allocate Supervisor</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowDeclineForm(!showDeclineForm)}
+                  disabled={isApprovingPlacement || isDecliningPlacement}
+                  className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-error/30 text-error hover:bg-error/10 text-xs font-semibold transition-colors disabled:opacity-50"
+                >
+                  <XCircle className="size-4" />
+                  <span>{showDeclineForm ? "Hide Decline Form" : "Decline Placement"}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Inline Decline Form */}
+            {showDeclineForm && (
+              <div className="p-4 rounded-xl border border-error/25 bg-error/5 space-y-3 mt-3 animate-in fade-in duration-200">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h4 className="text-xs font-bold text-error uppercase tracking-wider font-heading">
+                      Decline Placement Request
+                    </h4>
+                    <p className="text-xs text-on-surface-variant mt-0.5">
+                      Provide a reason so the student understands why their placement was declined and what to fix.
+                    </p>
+                  </div>
+                </div>
+
+                <textarea
+                  rows={2}
+                  value={declineReason}
+                  onChange={(e) => setDeclineReason(e.target.value)}
+                  placeholder="e.g., Company scope does not align with degree curriculum. Please select an accredited firm."
+                  className="w-full text-xs rounded-lg border border-outline-variant bg-surface-container-lowest text-on-surface p-3 focus:outline-none focus:ring-2 focus:ring-error"
+                />
+
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowDeclineForm(false)}
+                    className="px-3 py-1.5 text-xs text-on-surface-variant hover:text-on-surface font-semibold"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDeclinePlacement}
+                    disabled={isDecliningPlacement}
+                    className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-error text-on-error text-xs font-bold hover:bg-error/90 transition-colors shadow-xs disabled:opacity-50"
+                  >
+                    {isDecliningPlacement ? (
+                      <>
+                        <Loader2 className="size-3.5 animate-spin" />
+                        <span>Declining...</span>
+                      </>
+                    ) : (
+                      <>
+                        <XCircle className="size-3.5" />
+                        <span>Confirm Decline</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Rejected Status Alert */}
+      {placement && placement.status === "rejected" && (
+        <div className="p-5 rounded-2xl border border-error/30 bg-error/5 flex items-start gap-3.5 animate-in fade-in duration-200">
+          <div className="size-9 rounded-xl bg-error/15 text-error flex items-center justify-center shrink-0 mt-0.5">
+            <XCircle className="size-5" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="font-heading font-bold text-sm text-error">
+              Placement Request Declined
+            </h3>
+            <p className="text-xs text-on-surface-variant leading-relaxed">
+              Reason:{" "}
+              <span className="font-semibold text-on-surface">
+                {placement.rejectionReason || "Declined by department SIWES coordinator."}
+              </span>
+            </p>
+            <p className="text-[11px] text-on-surface-variant/80">
+              The student has been notified and can submit a new placement registration, or you can configure a direct department placement below.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Grid: Supervisor Assignment + Placement Management */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -783,13 +1083,14 @@ export function HodStudentDetailView({
                       <select
                         value={editStatus}
                         onChange={(e) =>
-                          setEditStatus(e.target.value as "pending" | "active" | "completed")
+                          setEditStatus(e.target.value as "pending" | "active" | "completed" | "rejected")
                         }
                         className="w-full text-sm rounded-lg border border-outline-variant bg-surface-container-lowest text-on-surface px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary"
                       >
                         <option value="pending">Pending Approval</option>
                         <option value="active">Active</option>
                         <option value="completed">Completed</option>
+                        <option value="rejected">Rejected</option>
                       </select>
                     </div>
                   </div>

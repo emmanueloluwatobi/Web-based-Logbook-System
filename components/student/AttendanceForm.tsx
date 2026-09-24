@@ -1,10 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useTransition, useMemo } from "react";
+import React, { useState, useTransition, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Calendar,
-  Clock,
   CheckCircle2,
   AlertCircle,
   XCircle,
@@ -38,25 +36,16 @@ export function AttendanceForm({ editingRecord, onCancelEdit }: AttendanceFormPr
   // Today in YYYY-MM-DD
   const todayStr = useMemo(() => new Date().toISOString().split("T")[0], []);
 
-  const [date, setDate] = useState(todayStr);
-  const [checkIn, setCheckIn] = useState("08:30");
-  const [checkOut, setCheckOut] = useState("17:00");
-  const [status, setStatus] = useState<"present" | "late" | "absent">("present");
-
-  // Sync editing record into form state
-  useEffect(() => {
-    if (editingRecord) {
-      setDate(editingRecord.date);
-      setCheckIn(editingRecord.checkIn ? editingRecord.checkIn.slice(0, 5) : "08:30");
-      setCheckOut(editingRecord.checkOut ? editingRecord.checkOut.slice(0, 5) : "");
-      setStatus(editingRecord.status);
-    } else {
-      setDate(todayStr);
-      setCheckIn("08:30");
-      setCheckOut("17:00");
-      setStatus("present");
-    }
-  }, [editingRecord, todayStr]);
+  const [date, setDate] = useState(editingRecord ? editingRecord.date : todayStr);
+  const [checkIn, setCheckIn] = useState(
+    editingRecord?.checkIn ? editingRecord.checkIn.slice(0, 5) : "08:30"
+  );
+  const [checkOut, setCheckOut] = useState(
+    editingRecord?.checkOut ? editingRecord.checkOut.slice(0, 5) : (editingRecord ? "" : "17:00")
+  );
+  const [status, setStatus] = useState<"present" | "late" | "absent">(
+    editingRecord ? editingRecord.status : "present"
+  );
 
   // Derived hours calculation in real-time
   const calculatedHours = useMemo(() => {
