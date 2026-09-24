@@ -122,6 +122,7 @@ export default async function HodStudentDetailPage({ params }: PageProps) {
       endDate: placement.endDate,
       targetDays: placement.targetDays,
       status: placement.status,
+      rejectionReason: placement.rejectionReason,
       placementSource: placement.placementSource,
       createdAt: placement.createdAt,
     })
@@ -213,7 +214,8 @@ export default async function HodStudentDetailPage({ params }: PageProps) {
       startDate: activePlacement.startDate,
       endDate: activePlacement.endDate,
       targetDays: activePlacement.targetDays,
-      status: activePlacement.status,
+      status: activePlacement.status as "pending" | "active" | "completed" | "rejected",
+      rejectionReason: activePlacement.rejectionReason,
       placementSource: activePlacement.placementSource,
       createdAt: activePlacement.createdAt.toISOString(),
     };

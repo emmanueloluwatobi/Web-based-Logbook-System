@@ -1,0 +1,1 @@
+ALTER TABLE "placement" ADD COLUMN "rejection_reason" text;

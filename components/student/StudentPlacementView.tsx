@@ -30,7 +30,8 @@ export interface OrganizationItem {
 
 export interface PlacementDetails {
   id: string;
-  status: "pending" | "active" | "completed";
+  status: "pending" | "active" | "completed" | "rejected";
+  rejectionReason?: string | null;
   placementSource: "self_secured" | "department_assigned";
   startDate: string;
   endDate: string;
@@ -72,6 +73,7 @@ export function StudentPlacementView({
 }: StudentPlacementViewProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const [isReRegistering, setIsReRegistering] = useState(false);
 
   // Registration form mode: "directory" vs "new"
   const [selectionMode, setSelectionMode] = useState<"directory" | "new">(
@@ -161,7 +163,7 @@ export function StudentPlacementView({
       </div>
 
       {/* State 1: Active or Completed Placement */}
-      {placement && placement.status !== "pending" && (
+      {placement && (placement.status === "active" || placement.status === "completed") && (
         <div className="flex flex-col gap-6">
           {/* Main Verified Placement Card */}
           <div className="bg-primary text-on-primary border border-primary rounded-2xl p-6 sm:p-8 relative overflow-hidden shadow-sm">
@@ -375,8 +377,51 @@ export function StudentPlacementView({
         </div>
       )}
 
-      {/* State 3: Unregistered (No Placement Exists Yet) */}
-      {!placement && (
+      {/* State 3: Declined Placement */}
+      {placement && placement.status === "rejected" && !isReRegistering && (
+        <div className="flex flex-col gap-6 animate-in fade-in duration-200">
+          <div className="bg-error/10 border border-error/30 rounded-2xl p-6 sm:p-7 relative overflow-hidden">
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 rounded-xl bg-error/20 text-error flex items-center justify-center shrink-0 mt-0.5">
+                <ShieldAlert className="size-5" />
+              </div>
+              <div className="space-y-2.5 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="px-2 py-0.5 rounded-full bg-error/20 text-error text-[11px] font-bold font-heading uppercase tracking-wide">
+                    Placement Declined
+                  </span>
+                  <span className="text-xs text-on-surface-variant font-medium">
+                    Department SIWES Review
+                  </span>
+                </div>
+                <h2 className="font-heading text-xl sm:text-2xl font-bold text-on-surface tracking-tight">
+                  Placement Submission Was Not Approved
+                </h2>
+                <div className="p-3.5 rounded-xl bg-surface-container-lowest border border-error/20 text-xs sm:text-sm text-on-surface leading-relaxed">
+                  <span className="font-semibold text-error">Coordinator Feedback: </span>
+                  <span>{placement.rejectionReason || "Company or training dates could not be verified by your department coordinator."}</span>
+                </div>
+                <p className="text-xs text-on-surface-variant leading-relaxed">
+                  Please review the feedback above and submit a new placement registration with an approved establishment.
+                </p>
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsReRegistering(true)}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-on-primary text-xs font-bold hover:bg-primary/90 transition-all shadow-xs"
+                  >
+                    <span>Register New Placement</span>
+                    <ArrowRight className="size-3.5" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* State 4: Unregistered or Re-registering after Decline */}
+      {(!placement || (placement.status === "rejected" && isReRegistering)) && (
         <div className="flex flex-col gap-6">
           {/* Header Banner */}
           <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 sm:p-8 shadow-xs">

@@ -12,7 +12,6 @@ import {
   logbookEntry,
   organization,
   academicSession,
-  program,
 } from "@/db/schema";
 import { HodDashboardView } from "@/components/hod/HodDashboardView";
 import type { NeedsAttentionItem } from "@/components/hod/NeedsAttentionTable";
@@ -67,28 +66,42 @@ export default async function HodDashboardPage() {
 
   // ── Compute stats and build needs-attention + placement-by-org ──
 
-  let stats = {
+  const stats = {
     totalStudents: 0,
     onPlacement: 0,
     withoutPlacement: 0,
     totalSupervisors: 0,
     studentsPerSupervisor: 0,
   };
-  let needsAttention: NeedsAttentionItem[] = [];
+  const needsAttention: NeedsAttentionItem[] = [];
   let placementByOrg: PlacementOrgStat[] = [];
 
   if (departmentId) {
     try {
       // 1. All students in this department
-      const deptStudents = await db
+      const rawDeptStudents = await db
         .select({
+          userId: user.id,
           profileId: studentProfile.id,
           studentName: user.name,
           matricNumber: studentProfile.matricNumber,
         })
-        .from(studentProfile)
-        .innerJoin(user, eq(studentProfile.userId, user.id))
-        .where(eq(user.departmentId, departmentId));
+        .from(user)
+        .leftJoin(studentProfile, eq(user.id, studentProfile.userId))
+        .where(and(eq(user.role, "student"), eq(user.departmentId, departmentId)));
+
+      const deptStudents: { profileId: string; studentName: string; matricNumber: string | null }[] = [];
+      for (const s of rawDeptStudents) {
+        if (!s.profileId) {
+          const [created] = await db
+            .insert(studentProfile)
+            .values({ userId: s.userId, isProfileComplete: false })
+            .returning({ id: studentProfile.id });
+          deptStudents.push({ profileId: created.id, studentName: s.studentName, matricNumber: s.matricNumber });
+        } else {
+          deptStudents.push({ profileId: s.profileId, studentName: s.studentName, matricNumber: s.matricNumber });
+        }
+      }
 
       stats.totalStudents = deptStudents.length;
       const studentProfileIds = deptStudents.map((s) => s.profileId);

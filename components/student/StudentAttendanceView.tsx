@@ -3,11 +3,9 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import {
-  CalendarCheck,
   Building2,
   AlertTriangle,
   ArrowRight,
-  ArrowLeft,
 } from "lucide-react";
 import { AttendanceProgress } from "./AttendanceProgress";
 import { AttendanceForm, type AttendanceRecordItem } from "./AttendanceForm";
@@ -103,6 +101,7 @@ export function StudentAttendanceView({ placement, records }: StudentAttendanceV
 
           {/* Manual Entry Form */}
           <AttendanceForm
+            key={editingRecord?.id || "new"}
             editingRecord={editingRecord}
             onCancelEdit={() => setEditingRecord(null)}
           />

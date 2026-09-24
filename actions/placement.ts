@@ -513,11 +513,85 @@ export async function approveStudentPlacement(formData: FormData): Promise<Place
     revalidatePath("/student");
     revalidatePath("/hod");
     revalidatePath("/hod/students");
+    revalidatePath(`/hod/students/${updated.studentId}`);
 
     return { success: true, data: updated };
   } catch (error) {
     console.error("[actions/placement.approveStudentPlacement]", error);
     return { success: false, error: "Failed to approve placement." };
+  }
+}
+
+export async function declineStudentPlacement(formData: FormData): Promise<PlacementMutationResult> {
+  try {
+    const { error: staffError, session } = await assertStaff();
+    if (staffError || !session) return { success: false, error: staffError || "Unauthorized" };
+
+    const placementId = formData.get("placementId") as string;
+    const reason = (formData.get("reason") as string)?.trim() || "";
+
+    if (!placementId) {
+      return { success: false, error: "Placement ID is required." };
+    }
+
+    const [placementRecord] = await db
+      .select({ id: placement.id, studentId: placement.studentId, status: placement.status })
+      .from(placement)
+      .where(eq(placement.id, placementId))
+      .limit(1);
+
+    if (!placementRecord) {
+      return { success: false, error: "Placement not found." };
+    }
+
+    if (placementRecord.status !== "pending") {
+      return { success: false, error: "Only pending placement requests can be declined." };
+    }
+
+    // Verify HOD department scoping
+    const { error: scopeError } = await verifyHodDepartmentScope(session, placementRecord.studentId);
+    if (scopeError) return { success: false, error: scopeError };
+
+    const [updated] = await db
+      .update(placement)
+      .set({
+        status: "rejected",
+        rejectionReason: reason || "Declined by department SIWES coordinator.",
+      })
+      .where(eq(placement.id, placementId))
+      .returning();
+
+    // Log notification for student
+    try {
+      const [studentData] = await db
+        .select({ userId: user.id })
+        .from(studentProfile)
+        .innerJoin(user, eq(studentProfile.userId, user.id))
+        .where(eq(studentProfile.id, placementRecord.studentId))
+        .limit(1);
+
+      if (studentData) {
+        await logNotification({
+          userId: studentData.userId,
+          type: "placement_rejected",
+          message: `Your SIWES placement request has been declined${reason ? `: ${reason}` : "."}`,
+        });
+      }
+    } catch (notifyErr) {
+      console.error("[actions/placement.declineStudentPlacement] Notification error:", notifyErr);
+    }
+
+    revalidatePath("/admin/placements");
+    revalidatePath("/student/placement");
+    revalidatePath("/student");
+    revalidatePath("/hod");
+    revalidatePath("/hod/students");
+    revalidatePath(`/hod/students/${placementRecord.studentId}`);
+
+    return { success: true, data: updated };
+  } catch (error) {
+    console.error("[actions/placement.declineStudentPlacement]", error);
+    return { success: false, error: "Failed to decline placement." };
   }
 }
 
@@ -660,7 +734,7 @@ export async function updatePlacement(formData: FormData): Promise<PlacementMuta
     const startDate = formData.get("startDate") as string;
     const endDate = formData.get("endDate") as string;
     const targetDaysRaw = formData.get("targetDays");
-    const status = formData.get("status") as "pending" | "active" | "completed";
+    const status = formData.get("status") as "pending" | "active" | "completed" | "rejected";
 
     if (!placementId) {
       return { success: false, error: "Placement ID is required." };
@@ -711,7 +785,7 @@ export async function updatePlacement(formData: FormData): Promise<PlacementMuta
       const td = parseInt(String(targetDaysRaw), 10);
       if (!isNaN(td) && td > 0) updatePayload.targetDays = td;
     }
-    if (status && ["pending", "active", "completed"].includes(status)) {
+    if (status && ["pending", "active", "completed", "rejected"].includes(status)) {
       updatePayload.status = status;
     }
 

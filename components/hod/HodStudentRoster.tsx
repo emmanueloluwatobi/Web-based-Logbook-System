@@ -18,7 +18,7 @@ import {
   HelpCircle,
 } from "lucide-react";
 
-export type PlacementFilterStatus = "all" | "active" | "pending" | "unplaced" | "completed";
+export type PlacementFilterStatus = "all" | "active" | "pending" | "unplaced" | "completed" | "rejected";
 
 export interface HodStudentItem {
   profileId: string;
@@ -27,7 +27,7 @@ export interface HodStudentItem {
   matricNumber: string | null;
   programName: string | null;
   level: string | null;
-  placementStatus: "active" | "pending" | "completed" | "unplaced";
+  placementStatus: "active" | "pending" | "completed" | "unplaced" | "rejected";
   placementId?: string | null;
   organizationName?: string | null;
   supervisorName?: string | null;
@@ -83,6 +83,7 @@ export function HodStudentRoster({ students, departmentName }: HodStudentRosterP
       pending: students.filter((s) => s.placementStatus === "pending").length,
       unplaced: students.filter((s) => s.placementStatus === "unplaced").length,
       completed: students.filter((s) => s.placementStatus === "completed").length,
+      rejected: students.filter((s) => s.placementStatus === "rejected").length,
     };
   }, [students]);
 
@@ -130,6 +131,7 @@ export function HodStudentRoster({ students, departmentName }: HodStudentRosterP
                 { id: "pending", label: "Pending", count: counts.pending },
                 { id: "unplaced", label: "Unplaced", count: counts.unplaced },
                 { id: "completed", label: "Completed", count: counts.completed },
+                { id: "rejected", label: "Declined", count: counts.rejected },
               ] as const
             ).map((tab) => (
               <button
@@ -253,7 +255,7 @@ export function HodStudentRoster({ students, departmentName }: HodStudentRosterP
                           <span>On Placement</span>
                         </span>
                       ) : s.placementStatus === "pending" ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-warning-container text-on-warning-container text-xs font-medium">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-warning-container text-on-warning-container text-xs font-medium animate-pulse">
                           <Clock className="size-3" />
                           <span>Pending Approval</span>
                         </span>
@@ -262,8 +264,13 @@ export function HodStudentRoster({ students, departmentName }: HodStudentRosterP
                           <CheckCircle2 className="size-3" />
                           <span>Completed</span>
                         </span>
-                      ) : (
+                      ) : s.placementStatus === "rejected" ? (
                         <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-error-container text-on-error-container text-xs font-medium">
+                          <AlertCircle className="size-3" />
+                          <span>Declined</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant text-xs font-medium">
                           <AlertCircle className="size-3" />
                           <span>Unplaced</span>
                         </span>
@@ -294,14 +301,25 @@ export function HodStudentRoster({ students, departmentName }: HodStudentRosterP
 
                     {/* Action */}
                     <td className="py-3.5 px-5 text-right">
-                      <Link
-                        href={`/hod/students/${s.profileId}`}
-                        onClick={(e) => e.stopPropagation()}
-                        className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary-container transition-colors"
-                      >
-                        <span>Manage</span>
-                        <ChevronRight className="size-3.5 group-hover:translate-x-0.5 transition-transform" />
-                      </Link>
+                      {s.placementStatus === "pending" ? (
+                        <Link
+                          href={`/hod/students/${s.profileId}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-warning/15 text-warning hover:bg-warning/25 text-xs font-bold transition-colors"
+                        >
+                          <span>Review</span>
+                          <ChevronRight className="size-3.5" />
+                        </Link>
+                      ) : (
+                        <Link
+                          href={`/hod/students/${s.profileId}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:text-primary-container transition-colors"
+                        >
+                          <span>Manage</span>
+                          <ChevronRight className="size-3.5 group-hover:translate-x-0.5 transition-transform" />
+                        </Link>
+                      )}
                     </td>
                   </tr>
                 ))}
